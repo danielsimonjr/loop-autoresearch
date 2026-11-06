@@ -64,5 +64,5 @@ test("pickEntry prefers dist/mcp/server.js and falls back to the .ts source with
 
 test(".mcp.json launches the plugin through bin/autoresearch-mcp.mjs", () => {
   const cfg = JSON.parse(fs.readFileSync(path.join(REPO, ".mcp.json"), "utf8"));
-  assert.deepEqual(cfg.mcpServers.autoresearch, { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/bin/autoresearch-mcp.mjs"] });
+  assert.deepEqual(cfg.mcpServers.autoresearch, { command: "node", args: ["${CLAUDE_PLUGIN_ROOT:-.}/bin/autoresearch-mcp.mjs"] });
 });

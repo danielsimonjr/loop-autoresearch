@@ -2,7 +2,7 @@
   "mcpServers": {
     "autoresearch": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/autoresearch-mcp.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT:-.}/bin/autoresearch-mcp.mjs"]
     }
   }
 }
