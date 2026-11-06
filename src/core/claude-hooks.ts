@@ -20,6 +20,16 @@ export interface ClaudeState {
   runsAtLastStop: number;
 }
 
+/** True when the state file exists but carries no numeric runsAtLastStop. */
+function runsAtLastStopMissing(workDir: string): boolean {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(claudeStatePath(workDir), "utf-8"));
+    return typeof parsed?.runsAtLastStop !== "number";
+  } catch {
+    return false;
+  }
+}
+
 export const CLAUDE_STATE_FILE = ".claude-state";
 
 export function claudeStatePath(workDir: string): string {
@@ -54,10 +64,14 @@ export interface StopOutcome {
 
 /**
  * Stop-hook decision (see SPEC §8 A3). Blocks only when the loop is active, a new
- * experiment ran since the last Stop, the hook is not already continuing, and no
- * guard (turn limit, consecutive failures, max experiments) applies.
+ * experiment ran since the last Stop, and no guard (turn limit, consecutive failures,
+ * max experiments) applies.
+ *
+ * `stop_hook_active` is deliberately ignored: Claude Code sets it on every Stop that
+ * follows a hook-initiated continuation, so honouring it would resume only once. The
+ * run-count gate, the turn cap and the consecutive-failure guard break the loop.
  */
-export function decideStop(cwd: string, stopHookActive: boolean): StopOutcome {
+export function decideStop(cwd: string, _stopHookActive = false): StopOutcome {
   const workDir = resolveWorkDir(cwd);
   const state = readClaudeState(workDir);
   if (!state.active) return { block: false, reason: null };
@@ -67,9 +81,9 @@ export function decideStop(cwd: string, stopHookActive: boolean): StopOutcome {
   const { results, currentSegment } = reconstructJsonlState(logText);
   const runs = results.length;
 
-  if (stopHookActive) {
+  if (runsAtLastStopMissing(workDir)) {
     writeClaudeState(workDir, { ...state, runsAtLastStop: runs });
-    return { block: false, reason: "stop hook already active" };
+    return { block: false, reason: "initialised runsAtLastStop" };
   }
   if (runs <= state.runsAtLastStop) {
     writeClaudeState(workDir, { ...state, runsAtLastStop: runs });

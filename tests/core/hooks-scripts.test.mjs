@@ -57,10 +57,36 @@ test("active loop with a new experiment blocks with the resume message", () => {
   }
 });
 
-test("stop_hook_active allows the stop", () => {
-  const dir = project({ runs: [run(1)] });
+test("stop_hook_active with a new run still blocks (continuations keep resuming)", () => {
+  const dir = project({ runs: [run(1), run(2)], state: { autoResumeTurns: 1, runsAtLastStop: 1 } });
+  try {
+    const out = stop(dir, true);
+    assert.equal(out.decision, "block");
+    const st = readState(dir);
+    assert.equal(st.autoResumeTurns, 2);
+    assert.equal(st.runsAtLastStop, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stop_hook_active without a new run allows the stop", () => {
+  const dir = project({ runs: [run(1)], state: { runsAtLastStop: 1 } });
   try {
     assert.equal(stop(dir, true), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("missing runsAtLastStop is initialised to the run count and allows the stop", () => {
+  const dir = project({ runs: [run(1), run(2)] });
+  try {
+    fs.writeFileSync(path.join(dir, ".auto", ".claude-state"), JSON.stringify({ active: true }));
+    assert.equal(stop(dir), null);
+    const st = readState(dir);
+    assert.equal(st.active, true);
+    assert.equal(st.runsAtLastStop, 2);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
