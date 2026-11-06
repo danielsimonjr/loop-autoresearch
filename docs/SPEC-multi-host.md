@@ -310,7 +310,7 @@ exclusion automatically — it lives under `.auto/`, which is already excluded.)
 | Pi behaviour | Claude Code mapping |
 |---|---|
 | `before_agent_start` system-prompt section + pointer to `.auto/prompt.md` (index.ts 1516-1555) | `SessionStart` hook (matcher `startup|resume|compact`) → `hooks/session-start.mjs`: if `.auto/.claude-state` is active, print `buildAutoresearchSystemPromptSection(workDir)` on stdout (Claude Code adds it as context). After `compact` it also prints `buildAutoresearchCompactionSummary(...)`. |
-| `agent_end` → auto-resume timer (`pi.sendUserMessage("Run the next iteration now…")`) | `Stop` hook → `hooks/stop.mjs`: reads `.claude-state`; if active and `stop_hook_active` is false and `autoResumeStopReasonFor({autoResumeTurns, state})` is null, increments `autoResumeTurns`, writes state, exits with `{"decision":"block","reason": composeResumeMessage()}`. Otherwise exits 0 (lets the agent stop) and prints the stop reason. Turn-limit guard reuses `AUTORESUME_TURN_LIMIT` (200) and the consecutive-failure override (20) from core. |
+| `agent_end` → auto-resume timer (`pi.sendUserMessage("Run the next iteration now…")`) | `Stop` hook → `hooks/stop.mjs`: reads `.claude-state`; if active and a new run was logged since the last Stop and `autoResumeStopReasonFor({autoResumeTurns, state})` is null, increments `autoResumeTurns`, writes state, exits with `{"decision":"block","reason": composeResumeMessage()}`. Otherwise exits 0 (lets the agent stop) and prints the stop reason. Turn-limit guard reuses `AUTORESUME_TURN_LIMIT` (200) and the consecutive-failure override (20) from core. |
 | "experiment gate" (only resume if an experiment ran this turn) | stop.mjs compares `log.jsonl` run count to the count stored in `.claude-state` at the last Stop; no new runs → no block (prevents the chat-only infinite loop). |
 | `session_before_compact` deterministic summary | covered by SessionStart `compact` matcher above (best-effort; Claude Code compaction cannot be replaced, only supplemented). |
 | Tool gating by mode | not mappable → error text in tools (§4.2). |
@@ -516,7 +516,9 @@ Change `.github/workflows/ci.yml` last step to `test -z "$(git ls-files site/bui
   `allowed-tools: Read, Write, Bash(git *), Bash(cat *)` is optional; omit to avoid over-restriction.
 - Stop-hook run-count gate: `.auto/.claude-state` = `{"active":bool,"autoResumeTurns":n,"runsAtLastStop":n}`.
   The hook reads run count from `log.jsonl` via `reconstructJsonlState`; it blocks only if
-  `active && !stop_hook_active && runs > runsAtLastStop && autoResumeStopReasonFor(...) === null`.
+  `active && runs > runsAtLastStop && autoResumeStopReasonFor(...) === null`. `stop_hook_active` is
+  deliberately ignored: Claude Code sets it on every Stop that follows a hook-initiated continuation,
+  so honouring it would resume exactly once (§9 F3).
   Every decision path rewrites `runsAtLastStop` to the current count.
 
 ### A4. Core seam clarifications for the Builder
@@ -545,9 +547,28 @@ Change `.github/workflows/ci.yml` last step to `test -z "$(git ls-files site/bui
     `.claude-plugin`, `.mcp.json`. Tests in `tests/mcp/` spawn the `.ts` entry directly (A1).
 11. Plugin files per A3; hook scripts are `.ts`; `tests/core/hooks-scripts.test.mjs` runs
     `hooks/stop.ts` with synthetic stdin for: inactive → allow; active+new runs → block with the
-    exact `composeResumeMessage()` text; `stop_hook_active` → allow; no new runs → allow;
+    exact `composeResumeMessage()` text; `stop_hook_active` + new run → block; no new runs → allow;
     turn limit 200 → allow and state unchanged; 21 consecutive discards → allow.
 
 ### A6. Decisions on open questions
 Q1: git marketplace + npm both work with A1 (no build). Q2: `open_dashboard` MCP tool — NOT in
 2.0. Q3: plugin name `autoresearch`, npm name unchanged. Q4: no `get_status` in Pi for 2.0.
+
+## 9. Post-build adversarial review outcome (Challenger → Fixer), all landed
+
+F1. Git-marketplace install had no `node_modules` → MCP server failed to start. Fixed: `.mcp.json`
+    runs `bin/autoresearch-mcp.mjs`, a launcher that self-installs runtime deps (`npm install
+    --omit=dev`, stdout redirected to stderr) when the SDK is not resolvable, then execs
+    `dist/mcp/server.js` if present else `src/mcp/server.ts` with strip-types flags.
+F2. npm-installed package under `node_modules` cannot strip types. Fixed: `dist/` is built in
+    `prepublishOnly` and shipped; the launcher prefers it. `engines.node` = `>=22.6`.
+F3. Stop hook honoured `stop_hook_active` → auto-resume fired once. Fixed: flag ignored; the
+    run-count gate, 200-turn cap and 20-consecutive-failure guard are the loop breakers. A
+    missing `runsAtLastStop` is initialised to the current count and the stop is allowed.
+F4. Pi steer ordering drifted (afterSteer sent after the before-hook). Fixed with
+    `onResultPushed` / `onAfterSteer` / `onBeforeSteer` callbacks; order now matches v1.9.0.
+F5/F6. Only the model wrote `.auto/.claude-state`; a restarted MCP process lost `active`.
+    Fixed: MCP `init_experiment` writes the state active; the session reads it on start.
+F8. MCP error replies now set `isError: true`.
+Not fixed (pre-existing in v1.9.0, listed under Known limitations in CHANGELOG): commands that
+ignore SIGTERM run to full length on timeout; `isAutoresearchShCommand` accepts `&&` chaining.
