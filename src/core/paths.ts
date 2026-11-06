@@ -86,3 +86,10 @@ export function hookScriptPath(workDir: string, stage: HookStage): string {
 export function ensureParentDir(filePath: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
+
+export const autoresearchJsonlPath  = (dir: string) => sessionFilePath(dir, "log");
+export const autoresearchMdPath     = (dir: string) => sessionFilePath(dir, "prompt");
+export const autoresearchIdeasPath  = (dir: string) => sessionFilePath(dir, "ideas");
+export const autoresearchChecksPath = (dir: string) => sessionFilePath(dir, "checks");
+export const autoresearchScriptPath = (dir: string) => sessionFilePath(dir, "measure");
+export const autoresearchConfigPath = (dir: string) => sessionFilePath(dir, "config");

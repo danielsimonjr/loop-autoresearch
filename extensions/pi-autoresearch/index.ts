@@ -55,6 +55,27 @@ import {
 import { resolveAutoresearchShortcuts, SHORTCUT_ACTIONS } from "./shortcuts.ts";
 import { getAutoresearchArgumentCompletions, isHelpRequest, renderAutoresearchHelp } from "./commands.ts";
 import { sessionFilePath, sessionFileCandidates, ensureParentDir, AUTO_DIR } from "./paths.ts";
+import { AUTORESEARCH_ACTIVATION_ENTRY, shouldAutoActivateAutoresearch } from "../../src/core/activation.ts";
+import { computeConfidence } from "../../src/core/confidence.ts";
+import { canonicalPath, readMaxExperiments, resolveWorkDir, validateWorkDir } from "../../src/core/config.ts";
+import { formatElapsed, formatNum } from "../../src/core/format.ts";
+import { autoResumeStopReasonFor } from "../../src/core/guards.ts";
+import { parseMetricLines } from "../../src/core/metrics.ts";
+import { autoresearchChecksPath, autoresearchIdeasPath, autoresearchJsonlPath, autoresearchMdPath, autoresearchScriptPath } from "../../src/core/paths.ts";
+import { createTempFileAllocator, killTree } from "../../src/core/process.ts";
+import { BENCHMARK_GUARDRAIL, composeCompactionResumeMessage, composeResumeMessage } from "../../src/core/prompts.ts";
+import { isAutoresearchShCommand } from "../../src/core/run.ts";
+import { cloneExperimentState, createExperimentState, currentResults, findBaselineMetric, findBaselineRunNumber, findBaselineSecondary, findBestMetric, isBetter } from "../../src/core/state.ts";
+import type { ASI, ExperimentResult, ExperimentState, LogDetails, RunDetails } from "../../src/core/types.ts";
+
+// Re-exports kept so existing imports from this module (tests, other extensions) keep working.
+export {
+  AUTORESUME_TURN_LIMIT,
+  CONSECUTIVE_FAILURE_OVERRIDE_LIMIT,
+  autoResumeStopReasonFor,
+  countConsecutiveDiscardOrCrashResults,
+} from "../../src/core/guards.ts";
+export { shouldAutoActivateAutoresearch } from "../../src/core/activation.ts";
 
 // ---------------------------------------------------------------------------
 // Experiment output limits (sent to LLM — keep small to save context)
@@ -65,117 +86,6 @@ const EXPERIMENT_MAX_BYTES = 4 * 1024; // 4KB
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/**
- * Actionable Side Information (ASI) — free-form diagnostics per experiment run.
- * The agent decides what to record. Any key/value pair is valid.
- */
-interface ASI {
-  [key: string]: unknown;
-}
-
-interface ExperimentResult {
-  commit: string;
-  metric: number;
-  /** Additional tracked metrics: { name: value } */
-  metrics: Record<string, number>;
-  status: "keep" | "discard" | "crash" | "checks_failed";
-  description: string;
-  timestamp: number;
-  /** Segment index — increments on each config header. Current segment = highest. */
-  segment: number;
-  /** Session-level confidence score at the time this result was logged. null if insufficient data. */
-  confidence: number | null;
-  /** Actionable Side Information — structured diagnostics for this run */
-  asi?: ASI;
-}
-
-interface MetricDef {
-  name: string;
-  unit: string;
-}
-
-interface ExperimentState {
-  results: ExperimentResult[];
-  /** Baseline primary metric (from first experiment in current segment) */
-  bestMetric: number | null;
-  bestDirection: "lower" | "higher";
-  metricName: string;
-  metricUnit: string;
-  /** Definitions for secondary metrics (order preserved) */
-  secondaryMetrics: MetricDef[];
-  name: string | null;
-  /** Current segment index (incremented on each init_experiment) */
-  currentSegment: number;
-  /** Maximum number of experiments before auto-stopping. null = unlimited. */
-  maxExperiments: number | null;
-  /** Current session confidence score (best improvement / noise floor). null if insufficient data. */
-  confidence: number | null;
-}
-
-export const AUTORESUME_TURN_LIMIT = 200;
-export const CONSECUTIVE_FAILURE_OVERRIDE_LIMIT = 20;
-
-type AutoResumeGuardState = Pick<ExperimentState, "results" | "currentSegment">;
-type AutoResumeGuardRuntime = {
-  autoResumeTurns: number;
-  state: AutoResumeGuardState;
-};
-
-/** Count trailing discard/crash results in the current segment. */
-export function countConsecutiveDiscardOrCrashResults(state: AutoResumeGuardState): number {
-  let count = 0;
-  for (let i = state.results.length - 1; i >= 0; i--) {
-    const result = state.results[i];
-    if (result.segment !== state.currentSegment) break;
-    if (result.status === "discard" || result.status === "crash") {
-      count++;
-      continue;
-    }
-    break;
-  }
-  return count;
-}
-
-export function autoResumeStopReasonFor(runtime: AutoResumeGuardRuntime): string | null {
-  if (runtime.autoResumeTurns >= AUTORESUME_TURN_LIMIT) {
-    return `Autoresearch auto-resume limit reached (${AUTORESUME_TURN_LIMIT} turns)`;
-  }
-  const failures = countConsecutiveDiscardOrCrashResults(runtime.state);
-  if (failures > CONSECUTIVE_FAILURE_OVERRIDE_LIMIT) {
-    return `Autoresearch auto-resume stopped — ${failures} consecutive discards/crashes`;
-  }
-  return null;
-}
-
-interface RunDetails {
-  command: string;
-  exitCode: number | null;
-  durationSeconds: number;
-  passed: boolean;
-  crashed: boolean;
-  timedOut: boolean;
-  tailOutput: string;
-  /** null = checks not run (no file or benchmark failed), true/false = ran */
-  checksPass: boolean | null;
-  checksTimedOut: boolean;
-  checksOutput: string;
-  checksDuration: number;
-  /** Metrics parsed from METRIC lines in output. null if none found. */
-  parsedMetrics: Record<string, number> | null;
-  /** Primary metric value extracted from parsedMetrics (matching metricName). null if not found. */
-  parsedPrimary: number | null;
-  /** Name of the primary metric (for display) */
-  metricName: string;
-  metricUnit: string;
-
-}
-
-interface LogDetails {
-  experiment: ExperimentResult;
-  state: ExperimentState;
-  wallClockSeconds: number | null;
-}
 
 interface AutoresearchRuntime {
   autoresearchMode: boolean;
@@ -272,267 +182,11 @@ export const LogParams = Type.Object({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Prefix for structured metric output lines: `METRIC name=value` */
-const METRIC_LINE_PREFIX = "METRIC";
-
-/**
- * Parse structured METRIC lines from command output.
- * Format: METRIC name=value (one per line)
- * Example:
- *   METRIC total_µs=15200
- *   METRIC compile_µs=4200
- *
- * Names must be word chars, dots, or µ (rejects `=` and other specials).
- * Values must be finite numbers (rejects Infinity, NaN, hex, etc.).
- * Duplicate names: last occurrence wins (allows scripts to refine values).
- * Returns a Map preserving insertion order of first occurrence per key.
- */
-/** Metric names that could cause prototype pollution if used as object keys */
-const DENIED_METRIC_NAMES = new Set(["__proto__", "constructor", "prototype"]);
-
-function parseMetricLines(output: string): Map<string, number> {
-  const metrics = new Map<string, number>();
-  const regex = new RegExp(`^${METRIC_LINE_PREFIX}\\s+([\\w.µ]+)=(\\S+)\\s*$`, "gm");
-  let match;
-  while ((match = regex.exec(output)) !== null) {
-    const name = match[1];
-    if (DENIED_METRIC_NAMES.has(name)) continue;
-    const value = Number(match[2]);
-    if (Number.isFinite(value)) {
-      metrics.set(name, value);
-    }
-  }
-  return metrics;
-}
-
-/** Format a number with comma-separated thousands: 15586 → "15,586" */
-function commas(n: number): string {
-  const s = String(Math.round(n));
-  const parts: string[] = [];
-  for (let i = s.length; i > 0; i -= 3) {
-    parts.unshift(s.slice(Math.max(0, i - 3), i));
-  }
-  return parts.join(",");
-}
-
-/** Format number with commas, preserving one decimal for fractional values */
-function fmtNum(n: number, decimals: number = 0): string {
-  if (decimals > 0) {
-    const int = Math.floor(Math.abs(n));
-    const frac = (Math.abs(n) - int).toFixed(decimals).slice(1); // ".3"
-    return (n < 0 ? "-" : "") + commas(int) + frac;
-  }
-  return commas(n);
-}
-
-function formatNum(value: number | null, unit: string): string {
-  if (value === null) return "—";
-  const u = unit || "";
-  // Integers: no decimals
-  if (value === Math.round(value)) return fmtNum(value) + u;
-  // Fractional: 2 decimal places
-  return fmtNum(value, 2) + u;
-}
-
-/** Lazy temp file allocator — returns the same path on subsequent calls */
-function createTempFileAllocator(): () => string {
-  let p: string | undefined;
-  return () => {
-    if (!p) {
-      const id = randomBytes(8).toString("hex");
-      p = path.join(tmpdir(), `pi-experiment-${id}.log`);
-    }
-    return p;
-  };
-}
-
-/** Format elapsed milliseconds as "Xm XXs" or "XXs" */
-function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
-  return `${s}s`;
-}
-
-/** Kill a process tree (best effort, tries process group first) */
-function killTree(pid: number): void {
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // Process may have already exited
-    }
-  }
-}
-
-/**
- * Check if a command's primary purpose is running the benchmark script.
- *
- * Strategy: strip common harmless prefixes (env vars, env/time/nice wrappers)
- * then check that the core command is the benchmark script invoked via a known
- * pattern. Rejects chaining tricks like "evil.py; measure.sh" because we require
- * the benchmark script to be the *first* real command.
- */
-function isAutoresearchShCommand(command: string): boolean {
-  let cmd = command.trim();
-
-  // Strip leading env variable assignments: FOO=bar BAZ="qux" ...
-  cmd = cmd.replace(/^(?:\w+=\S*\s+)+/, "");
-
-  // Strip known harmless command wrappers (env, time, nice, nohup) repeatedly
-  // Allows flags and their numeric values: e.g. "nice -n 10 time env ..."
-  let prev: string;
-  do {
-    prev = cmd;
-    cmd = cmd.replace(/^(?:env|time|nice|nohup)(?:\s+-\S+(?:\s+\d+)?)*\s+/, "");
-  } while (cmd !== prev);
-
-  // Now the core command must be the benchmark script via a known invocation.
-  // Current layout requires the `.auto/measure.sh` path; legacy `autoresearch.sh`
-  // is still accepted for in-flight sessions. An optional path prefix allows
-  //   ./.auto/measure.sh, /abs/path/.auto/measure.sh, bash [-flags] autoresearch.sh, etc.
-  return /^(?:(?:bash|sh|source)\s+(?:-\w+\s+)*)?(?:\/|\.{1,2}\/|[\w.-]+\/)*(?:autoresearch\.sh|\.auto\/measure\.sh)(?:\s|$)/.test(cmd);
-}
-
-function isBetter(
-  current: number,
-  best: number,
-  direction: "lower" | "higher"
-): boolean {
-  return direction === "lower" ? current < best : current > best;
-}
-
-/** Compute the median of a numeric array (returns 0 for empty arrays) */
-function sortedMedian(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
-}
-
-/**
- * Compute confidence score for the best improvement vs. session noise floor.
- *
- * Uses Median Absolute Deviation (MAD) of all metric values in the current
- * segment as a robust noise estimator. Returns `|best_delta| / MAD`, where
- * best_delta is the improvement of the best kept metric over baseline.
- *
- * Returns null when there are fewer than 3 data points (insufficient data)
- * or when MAD is 0 (all values identical — no measurable noise).
- */
-function computeConfidence(
-  results: ExperimentResult[],
-  segment: number,
-  direction: "lower" | "higher"
-): number | null {
-  const cur = currentResults(results, segment).filter((r) => r.metric > 0);
-  if (cur.length < 3) return null;
-
-  const values = cur.map((r) => r.metric);
-  const median = sortedMedian(values);
-  const deviations = values.map((v) => Math.abs(v - median));
-  const mad = sortedMedian(deviations);
-
-  if (mad === 0) return null;
-
-  const baseline = findBaselineMetric(results, segment);
-  if (baseline === null) return null;
-
-  // Find best kept metric in current segment
-  let bestKept: number | null = null;
-  for (const r of cur) {
-    if (r.status === "keep" && r.metric > 0) {
-      if (bestKept === null || isBetter(r.metric, bestKept, direction)) {
-        bestKept = r.metric;
-      }
-    }
-  }
-  if (bestKept === null || bestKept === baseline) return null;
-
-  const delta = Math.abs(bestKept - baseline);
-  return delta / mad;
-}
-
-/** Get results in the current segment only */
-function currentResults(results: ExperimentResult[], segment: number): ExperimentResult[] {
-  return results.filter((r) => r.segment === segment);
-}
-
-interface AutoresearchConfig {
-  maxIterations?: number;
-  workingDir?: string;
-}
-
-/** Read the config file (.auto/config.json, legacy autoresearch.config.json) from the given directory (always ctx.cwd) */
-function readConfig(cwd: string): AutoresearchConfig {
-  try {
-    const configPath = autoresearchConfigPath(cwd);
-    if (!fs.existsSync(configPath)) return {};
-    return JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-/** Read maxExperiments from the config file (if it exists) */
-function readMaxExperiments(cwd: string): number | null {
-  const config = readConfig(cwd);
-  return (typeof config.maxIterations === "number" && config.maxIterations > 0)
-    ? Math.floor(config.maxIterations)
-    : null;
-}
-
-/**
- * Resolve the effective working directory.
- * Reads workingDir from the config file (.auto/config.json) in ctxCwd.
- * Returns ctxCwd if not set. Supports relative (resolved against ctxCwd) and absolute paths.
- */
-function resolveWorkDir(ctxCwd: string): string {
-  const config = readConfig(ctxCwd);
-  if (!config.workingDir) return ctxCwd;
-  return path.isAbsolute(config.workingDir)
-    ? config.workingDir
-    : path.resolve(ctxCwd, config.workingDir);
-}
-
-function canonicalPath(existingPath: string): string {
-  try {
-    return fs.realpathSync.native(existingPath);
-  } catch {
-    return path.resolve(existingPath);
-  }
-}
-
-function samePath(a: string, b: string): boolean {
-  return canonicalPath(a) === canonicalPath(b);
-}
-
-const AUTORESEARCH_ACTIVATION_ENTRY = "pi-autoresearch.activation";
 
 interface AutoresearchActivationEntryData {
   version?: number;
   workDir?: string;
   active?: boolean;
-}
-
-export function shouldAutoActivateAutoresearch(
-  ctxCwd: string,
-  workDir: string,
-  hasPersistedLog: boolean,
-  recordedDecision: boolean | null = null,
-): boolean {
-  if (!hasPersistedLog) return false;
-  // An explicit `/autoresearch on|off` in this session always wins, so a manual
-  // off survives /tree, compaction, and reloads instead of snapping back on.
-  if (recordedDecision !== null) return recordedDecision;
-  // With no recorded decision, same-cwd sessions default on (a log implies intent);
-  // redirected workingDir sessions default off until this session opts in.
-  return samePath(ctxCwd, workDir);
 }
 
 function autoresearchActivationData(entry: CustomEntry): AutoresearchActivationEntryData | null {
@@ -560,102 +214,10 @@ function recordedActivationDecision(ctx: ExtensionContext, workDir: string): boo
   return decision;
 }
 
-/**
- * Validate that the resolved working directory exists.
- * Returns an error message if it doesn't exist, or null if OK.
- */
-function validateWorkDir(ctxCwd: string): string | null {
-  const workDir = resolveWorkDir(ctxCwd);
-  if (workDir === ctxCwd) return null;
-  try {
-    const stat = fs.statSync(workDir);
-    if (!stat.isDirectory()) {
-      return `workingDir "${workDir}" (from .auto/config.json) is not a directory.`;
-    }
-  } catch {
-    return `workingDir "${workDir}" (from .auto/config.json) does not exist.`;
-  }
-  return null;
-}
-
-/** Baseline = first experiment in current segment */
-function findBaselineMetric(results: ExperimentResult[], segment: number): number | null {
-  const cur = currentResults(results, segment);
-  return cur.length > 0 ? cur[0].metric : null;
-}
-
-/** Best = optimal metric across kept experiments in current segment (min for lower, max for higher) */
-function findBestMetric(
-  results: ExperimentResult[],
-  segment: number,
-  direction: "lower" | "higher",
-): number | null {
-  const kept = currentResults(results, segment)
-    .filter((r) => r.status === "keep")
-    .map((r) => r.metric);
-  if (kept.length === 0) return null;
-  return direction === "lower" ? Math.min(...kept) : Math.max(...kept);
-}
-
 // -----------------------------------------------------------------------
 // Session file paths (single source of truth for autoresearch.* filenames)
 // -----------------------------------------------------------------------
 
-const autoresearchJsonlPath  = (dir: string) => sessionFilePath(dir, "log");
-const autoresearchMdPath     = (dir: string) => sessionFilePath(dir, "prompt");
-const autoresearchIdeasPath  = (dir: string) => sessionFilePath(dir, "ideas");
-const autoresearchChecksPath = (dir: string) => sessionFilePath(dir, "checks");
-const autoresearchScriptPath = (dir: string) => sessionFilePath(dir, "measure");
-const autoresearchConfigPath = (dir: string) => sessionFilePath(dir, "config");
-
-function findBaselineRunNumber(results: ExperimentResult[], segment: number): number | null {
-  const index = results.findIndex((result) => result.segment === segment);
-  return index >= 0 ? index + 1 : null;
-}
-
-/**
- * Find secondary metric baselines from the first experiment in current segment.
- * For metrics that didn't exist at baseline time, falls back to the first
- * occurrence of that metric in the current segment.
- */
-function findBaselineSecondary(
-  results: ExperimentResult[],
-  segment: number,
-  knownMetrics?: MetricDef[]
-): Record<string, number> {
-  const cur = currentResults(results, segment);
-  const base: Record<string, number> = cur.length > 0
-    ? { ...(cur[0].metrics ?? {}) }
-    : {};
-
-  // Fill in any known metrics missing from baseline with their first occurrence
-  if (knownMetrics) {
-    for (const sm of knownMetrics) {
-      if (base[sm.name] === undefined) {
-        for (const r of cur) {
-          const val = (r.metrics ?? {})[sm.name];
-          if (val !== undefined) {
-            base[sm.name] = val;
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  return base;
-}
-
-function cloneExperimentState(state: ExperimentState): ExperimentState {
-  return {
-    ...state,
-    results: state.results.map((result) => ({
-      ...result,
-      metrics: { ...result.metrics },
-    })),
-    secondaryMetrics: state.secondaryMetrics.map((metric) => ({ ...metric })),
-  };
-}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -707,21 +269,6 @@ function getTuiSize(tui: { terminal?: { columns?: number; rows?: number } }): { 
   return {
     width: tui.terminal?.columns ?? process.stdout.columns ?? 120,
     height: tui.terminal?.rows ?? process.stdout.rows ?? 40,
-  };
-}
-
-function createExperimentState(): ExperimentState {
-  return {
-    results: [],
-    bestMetric: null,
-    bestDirection: "lower",
-    metricName: "metric",
-    metricUnit: "",
-    secondaryMetrics: [],
-    name: null,
-    currentSegment: 0,
-    maxExperiments: null,
-    confidence: null,
   };
 }
 
@@ -1068,8 +615,6 @@ function renderDashboardLines(
 // ---------------------------------------------------------------------------
 
 export default function autoresearchExtension(pi: ExtensionAPI) {
-  const BENCHMARK_GUARDRAIL =
-    "Be careful not to overfit to the benchmarks and do not cheat on the benchmarks.";
 
   // Outlasts pi's internal retry (setTimeout 0) and compaction-continue
   // (setTimeout 100); see badlogic/pi-mono#2023, #2110.
@@ -1182,25 +727,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
 
   const notifyAutoResumeLimitReached = (ctx: ExtensionContext, reason?: string | null): void => {
     ctx.ui.notify(reason ?? `Autoresearch auto-resume limit reached`, "info");
-  };
-
-  const composeResumeMessage = (_ctx: ExtensionContext): string => {
-    return [
-      "Run the next iteration now.",
-      "Use the persisted autoresearch state as needed, pick the most promising hypothesis, then call run_experiment + log_experiment.",
-      BENCHMARK_GUARDRAIL,
-    ].join(" ");
-  };
-
-  const composeCompactionResumeMessage = (_ctx: ExtensionContext): string => {
-    // The compaction summary already contains the rules, ideas, and recent
-    // runs — so this resume message just kicks the loop forward.
-    return [
-      "Run the next iteration now.",
-      "Pick the most promising hypothesis from the ideas backlog or the latest `next:` hints in recent runs, then call run_experiment + log_experiment.",
-      "Do not re-read .auto/prompt.md or .auto/log.jsonl — the compaction summary already contains them.",
-      BENCHMARK_GUARDRAIL,
-    ].join(" ");
   };
 
   const autoresearchCompactionFor = (
