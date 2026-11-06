@@ -24,6 +24,7 @@ import type {
 import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "../../src/core/truncate.ts";
 import { loadStateFromJsonl } from "../../src/core/state.ts";
 import { initExperiment } from "../../src/core/init.ts";
+import { createDashboardExporter, openInBrowser } from "../../src/core/dashboard-export.ts";
 import { runExperiment } from "../../src/core/run.ts";
 import { logExperiment } from "../../src/core/log.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -621,6 +622,7 @@ function renderDashboardLines(
 // ---------------------------------------------------------------------------
 
 export default function autoresearchExtension(pi: ExtensionAPI) {
+  const dashboard = createDashboardExporter();
 
   // Outlasts pi's internal retry (setTimeout 0) and compaction-continue
   // (setTimeout 100); see badlogic/pi-mono#2023, #2110.
@@ -936,7 +938,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     clearSessionUi(ctx);
     cancelPendingResume(getRuntime(ctx));
     runtimeStore.clear(getSessionKey(ctx));
-    stopDashboardServer();
+    dashboard.stop();
   });
 
   pi.on("agent_start", async (_event, ctx) => {
@@ -1052,7 +1054,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         };
       }
       const workDir = init.workDir;
-      broadcastDashboardUpdate(workDir);
+      dashboard.broadcast(workDir);
 
       const wasInactive = !runtime.autoresearchMode;
       recordAutoresearchActivation(workDir, true);
@@ -1293,7 +1295,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         lastRunChecks: runtime.lastRunChecks,
         lastRunDuration: runtime.lastRunDuration,
         autoresearchMode: runtime.autoresearchMode,
-        onJsonlWritten: (workDir) => broadcastDashboardUpdate(workDir),
+        onJsonlWritten: (workDir) => dashboard.broadcast(workDir),
       }, (cmd, args, opts) => pi.exec(cmd, args, opts));
       if (result.rejected) {
         return {
@@ -1596,204 +1598,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   // Export: local live dashboard
   // -----------------------------------------------------------------------
 
-  const TITLE_PLACEHOLDER = "__AUTORESEARCH_TITLE__";
-  const LOGO_PLACEHOLDER = "__AUTORESEARCH_LOGO__";
-
-  let cachedPackageRoot: string | null = null;
-
-  function packageRoot(): string {
-    if (cachedPackageRoot) return cachedPackageRoot;
-    const extensionDir = fs.realpathSync(path.dirname(fileURLToPath(import.meta.url)));
-    cachedPackageRoot = path.resolve(extensionDir, "../..");
-    return cachedPackageRoot;
-  }
-
-  function templatePath(): string {
-    return path.join(packageRoot(), "assets/template.html");
-  }
-
-  function readTemplate(): string {
-    return fs.readFileSync(templatePath(), "utf-8");
-  }
-
-  let cachedLogoDataUrl: string | null = null;
-
-  function logoDataUrl(): string {
-    if (cachedLogoDataUrl) return cachedLogoDataUrl;
-    const logoPath = path.join(packageRoot(), "assets/logo.webp");
-    const bytes = fs.readFileSync(logoPath);
-    cachedLogoDataUrl = `data:image/webp;base64,${bytes.toString("base64")}`;
-    return cachedLogoDataUrl;
-  }
-
-  function readJsonlContent(workDir: string): string {
-    return fs.readFileSync(autoresearchJsonlPath(workDir), "utf-8").trim();
-  }
-
-  function escapeHtml(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
-
-  function injectDataIntoTemplate(template: string, title: string): string {
-    const escapedTitle = escapeHtml(title);
-    return template.replace(TITLE_PLACEHOLDER, () => escapedTitle);
-  }
-
-  let dashboardServer: Server | null = null;
-  let dashboardServerPort: number | null = null;
-  let dashboardServerWorkDir: string | null = null;
-  let dashboardServerHtmlPath: string | null = null;
-  const dashboardSseClients = new Set<ServerResponse>();
-
-  function openInBrowser(url: string): void {
-    const child = process.platform === "win32"
-      ? spawn("cmd", ["/c", "start", "", url], {
-          detached: true,
-          shell: true,
-          stdio: "ignore",
-        })
-      : spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], {
-          detached: true,
-          stdio: "ignore",
-        });
-    // Swallow launcher errors (e.g. xdg-open missing); caller prints the URL
-    // so the user can open it manually.
-    child.on("error", () => { /* ignore */ });
-    child.unref();
-  }
-
-  function stopDashboardServer(): void {
-    for (const client of dashboardSseClients) {
-      try { client.end(); } catch { /* ignore */ }
-    }
-    dashboardSseClients.clear();
-
-    if (dashboardServer) {
-      try { dashboardServer.close(); } catch { /* ignore */ }
-    }
-
-    dashboardServer = null;
-    dashboardServerPort = null;
-    dashboardServerWorkDir = null;
-    dashboardServerHtmlPath = null;
-  }
-
-  function writeDashboardFile(workDir: string): string {
-    const jsonlContent = readJsonlContent(workDir);
-    const sessionName = extractAutoresearchSessionName(jsonlContent);
-    const html = injectDataIntoTemplate(readTemplate(), sessionName)
-      .replace(LOGO_PLACEHOLDER, logoDataUrl());
-    const exportDir = fs.mkdtempSync(path.join(tmpdir(), "pi-autoresearch-dashboard-"));
-    const dest = path.join(exportDir, "index.html");
-    fs.writeFileSync(dest, html);
-    return dest;
-  }
-
-  const CONTENT_TYPES: Record<string, string> = {
-    ".html": "text/html; charset=utf-8",
-    ".jsonl": "text/plain; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".png": "image/png",
-    ".webp": "image/webp",
-  };
-
-  function fileContentType(filePath: string): string {
-    const ext = path.extname(filePath).toLowerCase();
-    return CONTENT_TYPES[ext] ?? "application/octet-stream";
-  }
-
-  function resolveServedFile(workDir: string, requestPath: string): string | null {
-    if (requestPath === "/") return dashboardServerHtmlPath;
-    if (requestPath === "/autoresearch.jsonl") return autoresearchJsonlPath(workDir);
-    return null;
-  }
-
-  function registerSseClient(res: ServerResponse): void {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-    res.write("retry: 1000\n\n");
-    dashboardSseClients.add(res);
-    res.on("close", () => dashboardSseClients.delete(res));
-  }
-
-  function broadcastDashboardUpdate(workDir: string): void {
-    if (!dashboardServer || dashboardServerWorkDir !== workDir) return;
-    for (const res of dashboardSseClients) {
-      try {
-        res.write("event: jsonl-updated\n");
-        res.write(`data: ${Date.now()}\n\n`);
-      } catch {
-        dashboardSseClients.delete(res);
-      }
-    }
-  }
-
-  function startStaticServer(workDir: string, dashboardHtmlPath: string): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const resolvedWorkDir = path.resolve(workDir);
-      const resolvedDashboardHtmlPath = path.resolve(dashboardHtmlPath);
-
-      if (dashboardServer && dashboardServerWorkDir === resolvedWorkDir && dashboardServerPort) {
-        dashboardServerHtmlPath = resolvedDashboardHtmlPath;
-        resolve(dashboardServerPort);
-        return;
-      }
-
-      stopDashboardServer();
-      dashboardServerHtmlPath = resolvedDashboardHtmlPath;
-
-      const server = createServer((req, res) => {
-        const url = new URL(req.url ?? "/", "http://127.0.0.1");
-
-        if (url.pathname === "/events") {
-          registerSseClient(res);
-          return;
-        }
-
-        const filePath = resolveServedFile(resolvedWorkDir, url.pathname);
-        if (!filePath) {
-          res.writeHead(404);
-          res.end();
-          return;
-        }
-
-        fs.readFile(filePath, (err, data) => {
-          if (err) {
-            res.writeHead(404);
-            res.end();
-            return;
-          }
-          res.writeHead(200, { "Content-Type": fileContentType(filePath) });
-          res.end(data);
-        });
-      });
-
-      server.listen(0, "127.0.0.1", () => {
-        const address = server.address();
-        if (!address || typeof address === "string") {
-          reject(new Error("Failed to bind dashboard server"));
-          return;
-        }
-        dashboardServer = server;
-        dashboardServerPort = address.port;
-        dashboardServerWorkDir = resolvedWorkDir;
-        resolve(address.port);
-      });
-
-      server.on("error", reject);
-    });
-  }
-
   async function exportDashboard(ctx: ExtensionContext): Promise<void> {
     const workDir = resolveWorkDir(ctx.cwd);
     const jsonlPath = autoresearchJsonlPath(workDir);
@@ -1804,9 +1608,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     }
 
     try {
-      const dashboardHtmlPath = writeDashboardFile(workDir);
-      const port = await startStaticServer(workDir, dashboardHtmlPath);
-      const url = `http://127.0.0.1:${port}`;
+      const { url } = await dashboard.start(workDir);
       openInBrowser(url);
       ctx.ui.notify(`Dashboard at ${url} (live updates)`, "info");
     } catch (error) {
@@ -1831,7 +1633,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     runtime.lastRunDuration = null;
     runtime.runningExperiment = null;
     cancelPendingResume(runtime);
-    stopDashboardServer();
+    dashboard.stop();
     clearSessionUi(ctx);
     if (!ctx.isIdle()) ctx.abort();
   }
@@ -1909,7 +1711,7 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         runtime.runningExperiment = null;
         cancelPendingResume(runtime);
         runtime.state = createExperimentState();
-        stopDashboardServer();
+        dashboard.stop();
         updateWidget(ctx);
 
         const deletedPaths: string[] = [];
