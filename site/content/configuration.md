@@ -2,9 +2,13 @@
 
 pi-autoresearch has deliberately few knobs. Configure where and how a session runs; keep the experiment protocol consistent.
 
+pi and the Claude Code plugin share the same `.auto/` files and the same configuration, so a session started in one host can be resumed in the other. Where a section differs by host, it says so.
+
 ## Session configuration
 
-The optional `.auto/config.json` file lives under the Pi session directory. Paths resolve from the directory where Pi was started.
+The optional `.auto/config.json` file lives under the session directory: the directory where pi was started, or the Claude Code project directory. Paths resolve from that directory.
+
+The Claude Code MCP server uses the directory Claude Code started it in. When you register the server user-wide, set `AUTORESEARCH_CWD=/path/to/project` in its environment to pick the project explicitly.
 
 ```json
 {
@@ -15,7 +19,7 @@ The optional `.auto/config.json` file lives under the Pi session directory. Path
 
 | Setting | Type | Behavior |
 | --- | --- | --- |
-| `workingDir` | string | Runs file operations, Git, hooks, and experiments in another existing directory. Relative paths resolve from the Pi session directory. |
+| `workingDir` | string | Runs file operations, Git, hooks, and experiments in another existing directory. Relative paths resolve from the session directory. |
 | `maxIterations` | number | Stops the active segment after this many logged experiments. Start a new segment to continue. |
 
 > **Important:** The config file remains in the session directory even when `workingDir` points elsewhere.
@@ -29,6 +33,7 @@ The create skill writes the two required files. Add ideas, checks, and hooks onl
 | `.auto/prompt.md` | Generated | Objective, metric, scope, constraints, tried ideas, dead ends, and useful findings. This is the handoff across context resets. |
 | `.auto/measure.sh` | Generated | Runs the benchmark and prints one or more `METRIC name=number` lines. |
 | `.auto/log.jsonl` | Managed | Append-only session history. Do not hand-edit it while a session is running. |
+| `.auto/.claude-state` | Managed (Claude Code only) | JSON `{"active", "autoResumeTurns", "runsAtLastStop"}` state for the plugin. Written by `/autoresearch` and `init_experiment`, read by the SessionStart and Stop hooks. Survives reverts like everything under `.auto/`. |
 | `.auto/ideas.md` | Optional | A backlog for promising optimizations that are too complex or distracting to pursue immediately. Resuming agents prune tried ideas and experiment with what remains. |
 | `.auto/checks.sh` | Optional | Tests, type checks, or lint that run after a passing benchmark. A failure blocks the keep without changing the measured metric. |
 | `.auto/hooks/before.sh` | Optional | Receives session JSON before the next iteration. Stdout becomes a steer message for the agent. |
@@ -52,14 +57,22 @@ run_experiment({
 
 ## Safety and trust
 
-Pi packages run with your full user permissions. Review this repository before installing it, and run autoresearch in a dedicated branch or worktree with a clean working tree.
+Pi packages and Claude Code plugins run with your full user permissions. Review this repository before installing it, and run autoresearch in a dedicated branch or worktree with a clean working tree.
 
 Autoresearch edits files, creates and reverts commits, and executes `.auto/measure.sh`, `.auto/checks.sh`, and scripts under `.auto/hooks/`. Review those files before each session, keep credentials and sensitive files out of scope, and use a sandbox or restricted environment for untrusted projects.
+
+The Claude Code plugin also registers SessionStart and Stop hooks that read and write `.auto/.claude-state`. On the first launch from a git-marketplace install, its launcher runs `npm install --omit=dev` once inside the plugin directory to fetch the MCP SDK.
 
 For reproducible installs, pin a version you have reviewed, for example:
 
 ```bash
-pi install npm:pi-autoresearch@1.7.0
+pi install npm:pi-autoresearch@2.0.0
+```
+
+The Claude Code plugin is installed from the git marketplace and has no npm version pin, so review the marketplace commit you install:
+
+```bash
+claude plugin install autoresearch@pi-autoresearch
 ```
 
 Published npm releases include provenance attestations. Provider-side spending limits and `maxIterations` can bound the cost of an unattended session.
@@ -67,6 +80,8 @@ Published npm releases include provenance attestations. Provider-side spending l
 ## Keyboard shortcuts (opt-in)
 
 No shortcuts are bound by default. Every action is available through an `/autoresearch` subcommand, avoiding conflicts with pi's built-in keymap.
+
+*pi only.* Claude Code has no keyboard shortcut integration.
 
 To opt in, create `<agent-dir>/extensions/pi-autoresearch.json`. The agent directory is normally `~/.pi/agent`, or `PI_CODING_AGENT_DIR` when set.
 
@@ -96,7 +111,7 @@ Executable scripts under `.auto/hooks/` can observe or influence iteration bound
 ### Contract
 
 - **Input:** A single JSON object on stdin containing the event, working directory, run data, and session snapshot.
-- **Output:** Stdout becomes a steer message for the agent. Empty stdout is silent. Output is capped at 8 KB.
+- **Output:** Stdout becomes a steer message for the agent. In Claude Code, the same stdout is appended to the `log_experiment` tool result instead. Empty stdout is silent. Output is capped at 8 KB.
 - **Failure:** A non-zero exit or execution longer than 30 seconds produces an error steer instead of stopping the extension.
 - **History:** Every hook execution appends a `type: "hook"` entry to `.auto/log.jsonl`.
 - **Reverts:** The entire `.auto/` directory, including hooks, survives discarded experiments.
@@ -125,11 +140,70 @@ chmod +x .auto/hooks/before.sh .auto/hooks/after.sh
 - **`/autoresearch off`** — Stop auto-resume while preserving the session history.
 - **`/autoresearch finalize`** — Stop the loop, then turn kept experiments into reviewable branches with the finalize skill.
 - **`/autoresearch clear`** — Delete the log and reset runtime state for a clean start.
-- **`/autoresearch export`** — Open the live browser dashboard and export a shareable result image.
-- **`/autoresearch dashboard`** — Open the fullscreen, scrollable dashboard in the terminal.
+- **`/autoresearch export`** (pi only) — Open the live browser dashboard and export a shareable result image.
+- **`/autoresearch dashboard`** (pi only) — Open the fullscreen, scrollable dashboard in the terminal.
+- **`/autoresearch status`** (Claude Code only) — Call the `get_status` tool and summarize the session.
 - **`/autoresearch help`** — List the subcommands and examples without activating autoresearch mode.
 
-Subcommands autocomplete as you type `/autoresearch `.
+Subcommands autocomplete as you type `/autoresearch ` in pi.
+
+In Claude Code, `off` and `finalize` set `"active": false` in `.auto/.claude-state`, so the Stop hook stops resuming the loop. `off` keeps the log.
+
+## Claude Code
+
+The Claude Code plugin runs the same experiment engine behind a local MCP server over stdio. The [README](https://github.com/davebcn87/pi-autoresearch#use-with-claude-code) has a walkthrough; this section lists the reference details.
+
+### Install
+
+Install the plugin, which bundles the MCP server, the skills, the `/autoresearch` command and the hooks:
+
+```bash
+claude plugin marketplace add davebcn87/pi-autoresearch
+claude plugin install autoresearch@pi-autoresearch
+```
+
+To register only the MCP server, for one project, run this from the project root:
+
+```bash
+claude mcp add autoresearch -- node /absolute/path/to/pi-autoresearch/bin/autoresearch-mcp.mjs
+```
+
+### Requirements
+
+- Node 22.6 or newer and `npm` on the PATH. The server runs its TypeScript sources through Node's built-in type stripping, so there is no build step.
+- `git` on the PATH.
+
+### Tools and resources
+
+Tools: `init_experiment`, `run_experiment`, `log_experiment` and `get_status`.
+
+Resources: `autoresearch://log` (raw `log.jsonl`), `autoresearch://prompt`, `autoresearch://ideas` and `autoresearch://status` (same JSON as `get_status`). Missing files return empty content, not errors.
+
+### Hooks
+
+- **SessionStart** (matcher `startup|resume|compact`): while the loop is active, prints the autoresearch guidance and `.auto/prompt.md`. After `/compact`, it also prints the compaction summary.
+- **Stop**: resumes the loop with a "Run the next iteration now." turn only when all of these hold:
+  - the loop is active in `.auto/.claude-state`;
+  - a new run was logged since the last stop;
+  - the loop is under the 200 resumed-turn cap;
+  - there are not more than 20 consecutive discards or crashes in the current segment.
+
+  It also stops when `maxIterations` is reached and sets the loop inactive.
+
+### Differences from pi
+
+- No live widget, fullscreen overlay, keyboard shortcuts or browser dashboard. Use `/autoresearch status` (`get_status`) instead.
+- Hook stdout is appended to the `log_experiment` tool result instead of arriving as a separate steer message.
+- Before `init_experiment` has written a config header to `.auto/log.jsonl`, `run_experiment` and `log_experiment` return an `isError` result reading "Autoresearch session not initialized".
+- The server works in the directory Claude Code started it in. Set `AUTORESEARCH_CWD` when you register it user-wide.
+
+### Troubleshooting
+
+- **Server fails with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.** Node refuses to strip types inside `node_modules`. Install from npm, which ships `dist/`, or run `npm run build` in the checkout.
+- **`could not install dependencies` on first launch.** The plugin directory is read-only or offline. Run `npm install --omit=dev` there once by hand.
+- **Tools say "not initialized".** Call `init_experiment` first, or run `/autoresearch <goal>`, which does it for you.
+- **The loop does not resume after a turn.** Check that `.auto/.claude-state` has `"active": true` and that the turn logged a run. `/autoresearch <goal>` re-activates it.
+- **Experiments run in the wrong directory.** Set `AUTORESEARCH_CWD`, or use `workingDir` in `.auto/config.json`.
 
 ## Intentionally fixed behavior
 
@@ -140,6 +214,7 @@ These constraints keep results comparable and sessions recoverable.
 - **State lives under `.auto/`.** The folder name and JSONL record format are part of the extension contract. Legacy files are read only for compatibility.
 - **Hooks have a fixed boundary.** Only `before.sh` and `after.sh` are recognized. They receive JSON on stdin and return steer text on stdout.
 - **Safety guards remain internal.** Auto-resume turn and consecutive-failure guards are not tuning knobs.
+- **Claude Code uses the same guards.** The Stop hook applies the same auto-resume values as pi (200 resumed turns, 20 consecutive discards or crashes). They are not configurable.
 - **Dashboard presentation is not themed per session.** Browser and terminal dashboards follow the extension UI rather than session-level style configuration.
 
 ## Start with the defaults

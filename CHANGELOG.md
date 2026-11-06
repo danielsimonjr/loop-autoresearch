@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- README, website documentation and hook examples now cover the Claude Code plugin alongside pi.
+
 ## [2.0.0] - 2026-11-06
 
 ### Added

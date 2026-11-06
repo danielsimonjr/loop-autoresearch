@@ -6,9 +6,9 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob: https://api.github.com; media-src 'self' blob:; frame-src https://platform.twitter.com; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
     <meta name="referrer" content="no-referrer">
     <meta name="theme-color" content="#070a08">
-    <meta name="description" content="pi-autoresearch gives pi an autonomous experiment loop: try an idea, measure it, keep what works, revert what doesn't, and repeat.">
+    <meta name="description" content="pi-autoresearch gives pi and Claude Code an autonomous experiment loop: try an idea, measure it, keep what works, revert what doesn't, and repeat.">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="pi-autoresearch — Autonomous experiment loop for pi">
+    <meta property="og:title" content="pi-autoresearch — Autonomous experiment loop for pi and Claude Code">
     <meta property="og:description" content="Try an idea. Measure it. Keep what works. Revert what doesn't. Repeat.">
     <meta property="og:image" content="https://davebcn87.github.io/pi-autoresearch/assets/social-preview-dark.png">
     <meta property="og:image:width" content="1200">
@@ -22,7 +22,7 @@
     <link rel="icon" href="assets/og-image.webp">
     <link rel="stylesheet" href="vendor/asciinema-player.css">
     <link rel="stylesheet" href="styles.css">
-    <title>pi-autoresearch — Autonomous experiment loop for pi</title>
+    <title>pi-autoresearch — Autonomous experiment loop for pi and Claude Code</title>
   </head>
   <body class="landing-page">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -45,15 +45,22 @@
     <main id="main">
       <section class="hero shell" id="top">
         <div class="hero-copy">
-          <p class="eyebrow">Autonomous optimization for pi</p>
+          <p class="eyebrow">Autonomous optimization for pi and Claude Code</p>
           <h1>
-            Give pi a metric.
+            Give your agent a metric.
             <span>Let it run.</span>
           </h1>
           <p class="hero-intro">It tests ideas, measures every result, keeps improvements, and reverts the rest.</p>
           <div class="install" data-copy-block>
             <code><span aria-hidden="true">$</span> pi install npm:pi-autoresearch</code>
             <button class="copy-button" type="button" data-copy="pi install npm:pi-autoresearch" aria-label="Copy install command">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <div class="install" data-copy-block>
+            <code><span aria-hidden="true">$</span> claude plugin install autoresearch@pi-autoresearch</code>
+            <button class="copy-button" type="button" data-copy="claude plugin install autoresearch@pi-autoresearch" aria-label="Copy Claude Code install command">
               <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
               <span>Copy</span>
             </button>
@@ -536,6 +543,13 @@ pnpm lint</code></pre>
           <div class="install install-light" data-copy-block>
             <code><span aria-hidden="true">$</span> pi install npm:pi-autoresearch</code>
             <button class="copy-button" type="button" data-copy="pi install npm:pi-autoresearch" aria-label="Copy install command">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <div class="install install-light" data-copy-block>
+            <code><span aria-hidden="true">$</span> claude plugin install autoresearch@pi-autoresearch</code>
+            <button class="copy-button" type="button" data-copy="claude plugin install autoresearch@pi-autoresearch" aria-label="Copy Claude Code install command">
               <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
               <span>Copy</span>
             </button>
