@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import { resolveWorkDir } from "./config.ts";
+import { autoresearchJsonlPath } from "./paths.ts";
 export type JsonlEntry = Record<string, unknown>;
 
 export interface AutoresearchConfigEntry extends JsonlEntry {
@@ -190,3 +193,28 @@ export function reconstructJsonlState(jsonlContent: string): ReconstructedJsonlS
 
   return state;
 }
+
+export const hasLoggedExperiment = (ctxCwd: string): boolean => {
+  try {
+    const jsonlPath = autoresearchJsonlPath(resolveWorkDir(ctxCwd));
+    if (!fs.existsSync(jsonlPath)) return false;
+    return reconstructJsonlState(fs.readFileSync(jsonlPath, "utf-8")).results.length > 0;
+  } catch {
+    return false;
+  }
+};
+
+export const readJsonlLines = (workDir: string): string[] => {
+  const jsonlPath = autoresearchJsonlPath(workDir);
+  if (!fs.existsSync(jsonlPath)) return [];
+  return fs.readFileSync(jsonlPath, "utf-8").split("\n").filter(Boolean);
+};
+
+export const readLastRun = (workDir: string): Record<string, unknown> | null => {
+  const lines = readJsonlLines(workDir);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const entry = parseJsonlEntry(lines[i]);
+    if (isAutoresearchRunEntry(entry)) return entry;
+  }
+  return null;
+};

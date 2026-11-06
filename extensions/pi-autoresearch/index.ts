@@ -22,6 +22,7 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "../../src/core/truncate.ts";
+import { loadStateFromJsonl } from "../../src/core/state.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, truncateToWidth, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -75,6 +76,8 @@ export {
   autoResumeStopReasonFor,
   countConsecutiveDiscardOrCrashResults,
 } from "../../src/core/guards.ts";
+import { buildSessionSnapshot, fireHook } from "../../src/core/hooks.ts";
+import { hasLoggedExperiment, readLastRun } from "../../src/core/jsonl.ts";
 export { shouldAutoActivateAutoresearch } from "../../src/core/activation.ts";
 
 // ---------------------------------------------------------------------------
@@ -757,47 +760,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
   const hasAutoresearchRules = (ctx: ExtensionContext): boolean =>
     fs.existsSync(autoresearchMdPath(resolveWorkDir(ctx.cwd)));
 
-  const hasLoggedExperiment = (ctxCwd: string): boolean => {
-    try {
-      const jsonlPath = autoresearchJsonlPath(resolveWorkDir(ctxCwd));
-      if (!fs.existsSync(jsonlPath)) return false;
-      return reconstructJsonlState(fs.readFileSync(jsonlPath, "utf-8")).results.length > 0;
-    } catch {
-      return false;
-    }
-  };
-
-  const readJsonlLines = (workDir: string): string[] => {
-    const jsonlPath = autoresearchJsonlPath(workDir);
-    if (!fs.existsSync(jsonlPath)) return [];
-    return fs.readFileSync(jsonlPath, "utf-8").split("\n").filter(Boolean);
-  };
-
-  const readLastRun = (workDir: string): Record<string, unknown> | null => {
-    const lines = readJsonlLines(workDir);
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const entry = parseJsonlEntry(lines[i]);
-      if (isAutoresearchRunEntry(entry)) return entry;
-    }
-    return null;
-  };
-
-  const buildSessionSnapshot = (state: ExperimentState): SessionSnapshot => ({
-    metric_name: state.metricName,
-    metric_unit: state.metricUnit,
-    direction: state.bestDirection,
-    baseline_metric: state.bestMetric,
-    best_metric: findBestMetric(state.results, state.currentSegment, state.bestDirection),
-    run_count: state.results.length,
-    goal: state.name ?? "",
-  });
-
-  const fireHook = async (payload: HookPayload): Promise<string | null> => {
-    const result = await runHook(payload);
-    appendHookLogEntryIfConfigured(autoresearchJsonlPath(payload.cwd), payload.event, result);
-    return steerMessageFor(payload.event, result);
-  };
-
   // Running experiment state (for spinner in fullscreen overlay)
   let overlayTui: { requestRender: () => void } | null = null;
   let spinnerInterval: ReturnType<typeof setInterval> | null = null;
@@ -839,32 +801,11 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
     const workDir = resolveWorkDir(ctx.cwd);
 
     // Primary: read from .auto/log.jsonl (alongside .auto/prompt.md and .auto/measure.sh)
-    const jsonlPath = autoresearchJsonlPath(workDir);
-    const hasPersistedLog = fs.existsSync(jsonlPath);
-    let loadedFromJsonl = false;
-    try {
-      if (hasPersistedLog) {
-        const reconstructed = reconstructJsonlState(fs.readFileSync(jsonlPath, "utf-8"));
-        state.name = reconstructed.name;
-        state.metricName = reconstructed.metricName;
-        state.metricUnit = reconstructed.metricUnit;
-        state.bestDirection = reconstructed.bestDirection;
-        state.currentSegment = reconstructed.currentSegment;
-        state.results = reconstructed.results.map((result) => ({
-          ...result,
-          metrics: { ...result.metrics },
-        }));
-        state.secondaryMetrics = reconstructed.secondaryMetrics.map((metric) => ({ ...metric }));
-
-        if (state.results.length > 0) {
-          loadedFromJsonl = true;
-          state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
-          state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
-        }
-      }
-    } catch {
-      // Fall through to session history
-    }
+    const loaded = loadStateFromJsonl(workDir);
+    runtime.state = loaded.state;
+    state = runtime.state;
+    const hasPersistedLog = loaded.hasPersistedLog;
+    let loadedFromJsonl = loaded.loadedFromJsonl;
 
     // Fallback: reconstruct from session history (backward compat)
     if (!loadedFromJsonl) {

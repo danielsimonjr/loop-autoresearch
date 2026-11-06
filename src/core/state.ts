@@ -1,3 +1,7 @@
+import * as fs from "node:fs";
+import { reconstructJsonlState } from "./jsonl.ts";
+import { autoresearchJsonlPath } from "./paths.ts";
+import { computeConfidence } from "./confidence.ts";
 // Experiment state helpers (pure).
 
 
@@ -96,4 +100,42 @@ export function createExperimentState(): ExperimentState {
     maxExperiments: null,
     confidence: null,
   };
+}
+
+export function loadStateFromJsonl(workDir: string): {
+  state: ExperimentState;
+  hasPersistedLog: boolean;
+  loadedFromJsonl: boolean;
+} {
+  const state = createExperimentState();
+
+  // Primary: read from .auto/log.jsonl (alongside .auto/prompt.md and .auto/measure.sh)
+  const jsonlPath = autoresearchJsonlPath(workDir);
+  const hasPersistedLog = fs.existsSync(jsonlPath);
+  let loadedFromJsonl = false;
+  try {
+    if (hasPersistedLog) {
+      const reconstructed = reconstructJsonlState(fs.readFileSync(jsonlPath, "utf-8"));
+      state.name = reconstructed.name;
+      state.metricName = reconstructed.metricName;
+      state.metricUnit = reconstructed.metricUnit;
+      state.bestDirection = reconstructed.bestDirection;
+      state.currentSegment = reconstructed.currentSegment;
+      state.results = reconstructed.results.map((result) => ({
+        ...result,
+        metrics: { ...result.metrics },
+      }));
+      state.secondaryMetrics = reconstructed.secondaryMetrics.map((metric) => ({ ...metric }));
+
+      if (state.results.length > 0) {
+        loadedFromJsonl = true;
+        state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
+        state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
+      }
+    }
+  } catch {
+    // Fall through to session history
+  }
+
+  return { state, hasPersistedLog, loadedFromJsonl };
 }

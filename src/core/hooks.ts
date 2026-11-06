@@ -2,8 +2,9 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 
 import { hasAutoresearchConfigHeader } from "./jsonl.ts";
-import { hookScriptPath } from "./paths.ts";
-
+import { autoresearchJsonlPath, hookScriptPath } from "./paths.ts";
+import { findBestMetric } from "./state.ts";
+import type { ExperimentState } from "./types.ts";
 const TIMEOUT_MS = 30_000;
 const STDOUT_MAX_BYTES = 8 * 1024;
 const TRUNCATION_MARKER = "\n…[truncated: hook stdout exceeded 8KB]";
@@ -178,3 +179,19 @@ export function appendHookLogEntryIfConfigured(
     return false;
   }
 }
+
+export const buildSessionSnapshot = (state: ExperimentState): SessionSnapshot => ({
+  metric_name: state.metricName,
+  metric_unit: state.metricUnit,
+  direction: state.bestDirection,
+  baseline_metric: state.bestMetric,
+  best_metric: findBestMetric(state.results, state.currentSegment, state.bestDirection),
+  run_count: state.results.length,
+  goal: state.name ?? "",
+});
+
+export const fireHook = async (payload: HookPayload): Promise<string | null> => {
+  const result = await runHook(payload);
+  appendHookLogEntryIfConfigured(autoresearchJsonlPath(payload.cwd), payload.event, result);
+  return steerMessageFor(payload.event, result);
+};
