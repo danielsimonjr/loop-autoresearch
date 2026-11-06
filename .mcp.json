@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "autoresearch": {
+      "command": "node",
+      "args": [
+        "--experimental-strip-types",
+        "--no-warnings=ExperimentalWarning",
+        "${CLAUDE_PLUGIN_ROOT}/src/mcp/server.ts"
+      ]
+    }
+  }
+}
