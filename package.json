@@ -1,6 +1,6 @@
 {
   "name": "pi-autoresearch",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "Autonomous experiment loop for pi — run, measure, keep or discard. Inspired by karpathy/autoresearch.",
   "keywords": [
@@ -24,7 +24,7 @@
     "url": "https://github.com/davebcn87/pi-autoresearch/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.6"
   },
   "packageManager": "pnpm@10.28.2",
   "pi": {
@@ -37,15 +37,26 @@
   },
   "files": [
     "extensions",
+    "src",
+    "dist",
     "skills",
+    "hooks",
+    "bin",
+    "commands",
+    ".claude-plugin",
+    ".mcp.json",
     "assets",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "package.json"
+    "package.json",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test tests/*.test.mjs"
+    "test": "node --experimental-strip-types --test tests/*.test.mjs tests/core/*.test.mjs tests/mcp/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -57,6 +68,15 @@
     "@earendil-works/pi-ai": "^0.74.0",
     "@earendil-works/pi-coding-agent": "^0.74.0",
     "@earendil-works/pi-tui": "^0.74.0",
-    "@sinclair/typebox": "^0.34.41"
+    "@sinclair/typebox": "^0.34.41",
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^3.25.76"
+  },
+  "bin": {
+    "autoresearch-mcp": "./bin/autoresearch-mcp.mjs"
   }
 }

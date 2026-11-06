@@ -1,0 +1,11 @@
+{
+  "name": "pi-autoresearch",
+  "owner": { "name": "David Cortés" },
+  "plugins": [
+    {
+      "name": "autoresearch",
+      "source": "./",
+      "description": "Autonomous experiment loop: run, measure, keep or discard."
+    }
+  ]
+}

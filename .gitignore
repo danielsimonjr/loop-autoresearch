@@ -7,3 +7,6 @@ nano-banana-*.png
 
 # Generated site output
 /site/build/
+
+# Built output (npm consumers only; not required to run the plugin)
+/dist/

@@ -15,3 +15,7 @@ The deployed landing page includes Asciinema Player under the Apache License 2.0
 ## pi
 
 pi-autoresearch is a community extension for pi. References to pi identify compatibility and do not transfer ownership of the pi name or project.
+
+## pi-mono (truncation utilities)
+
+`src/core/truncate.ts` is vendored from `@earendil-works/pi-coding-agent` (`dist/core/tools/truncate.js`), MIT License, Copyright the pi authors. The copy keeps the upstream behaviour; `tests/core/truncate.test.mjs` checks it against the upstream package.

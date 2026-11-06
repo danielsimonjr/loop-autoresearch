@@ -1,0 +1,22 @@
+// Barrel for the host-agnostic core. MCP server and hook scripts import from here.
+export * from "./types.ts";
+export * from "./guards.ts";
+export * from "./metrics.ts";
+export * from "./format.ts";
+export * from "./process.ts";
+export * from "./run.ts";
+export * from "./state.ts";
+export * from "./confidence.ts";
+export * from "./config.ts";
+export * from "./activation.ts";
+export * from "./paths.ts";
+export * from "./jsonl.ts";
+export * from "./hooks.ts";
+export * from "./compaction.ts";
+export * from "./truncate.ts";
+export * from "./prompts.ts";
+export * from "./init.ts";
+export * from "./log.ts";
+export * from "./dashboard-export.ts";
+export * from "./claude-hooks.ts";
+export type { HookStage } from "./hooks.ts";

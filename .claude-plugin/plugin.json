@@ -1,0 +1,8 @@
+{
+  "name": "autoresearch",
+  "version": "2.0.0",
+  "description": "Autonomous experiment loop: run, measure, keep or discard.",
+  "author": { "name": "David Cortés" },
+  "license": "MIT",
+  "keywords": ["autoresearch", "experiment", "optimization", "benchmark", "mcp"]
+}
