@@ -86,3 +86,10 @@ export interface InitParamsT {
   metric_unit?: string;
   direction?: "lower" | "higher";
 }
+
+/** Plain shape of run_experiment params (TypeBox/zod schemas in the hosts must match). */
+export interface RunParamsT {
+  command: string;
+  timeout_seconds?: number;
+  checks_timeout_seconds?: number;
+}
