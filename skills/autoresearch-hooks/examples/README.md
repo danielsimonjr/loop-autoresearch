@@ -13,6 +13,15 @@ The files here are **not** marked executable on purpose — they're references, 
 
 For the hook contract (stdin schemas, stdout handling, timeouts, observability), see the main [README §Hooks](../../../README.md#hooks-optional).
 
+## Works in both hosts
+
+The hook contract is identical under pi and Claude Code: a JSON object on stdin, text on stdout, a 30-second timeout and an 8 KB stdout cap. The scripts here run unchanged under either host. The only difference is where stdout goes:
+
+- **pi** delivers it as a steer message.
+- **Claude Code** appends it to the tool result: the `before` output fired by `init_experiment` lands in the `init_experiment` result, and later ones in the `log_experiment` result.
+
+Where a script's comments say "steer", read that as the stdout delivery described above. None of these examples uses pi UI or `/autoresearch dashboard`. `after/macos-notify.sh` is OS-specific (macOS only), which is independent of the host.
+
 ## `before/` — fires before each iteration
 
 | Script | Purpose |

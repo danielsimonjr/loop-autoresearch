@@ -2,14 +2,14 @@
 <img  height="120" alt="result" src="https://github.com/user-attachments/assets/c66cbd02-4491-4833-a63a-142cfd7530c1" />
 
 # pi-autoresearch
-### Autonomous experiment loop for pi
-**[Website](https://davebcn87.github.io/pi-autoresearch/)** · **[Documentation](https://davebcn87.github.io/pi-autoresearch/configuration.html)** · **[Install](#install)** · **[Usage](#usage)** · **[How it works](#how-it-works)**
+### Autonomous experiment loop for pi and Claude Code
+**[Website](https://davebcn87.github.io/pi-autoresearch/)** · **[Documentation](https://davebcn87.github.io/pi-autoresearch/configuration.html)** · **[Install](#install)** · **[Claude Code](#use-with-claude-code)** · **[Usage](#usage)** · **[How it works](#how-it-works)**
 
 </div>
 
 *Try an idea, measure it, keep what works, discard what doesn't, repeat forever.*
 
-An extension for **[pi](https://pi.dev/)** — an AI coding agent that runs in your terminal. pi-autoresearch gives pi the tools and workflow to run autonomous optimization loops: try an idea, benchmark it, keep improvements, revert regressions, repeat.
+pi-autoresearch gives an AI coding agent the tools and workflow to run autonomous optimization loops: try an idea, benchmark it, keep improvements, revert regressions, repeat. It ships as an extension for **[pi](https://pi.dev/)** and as a **[Claude Code](https://claude.com/claude-code) plugin** backed by a local MCP server. Both hosts share one experiment engine and the same `.auto/` session files, so a loop started in one can be resumed in the other: Claude Code → pi works automatically (pi auto-activates when a log exists); pi → Claude Code needs `/autoresearch <goal>` once to write `.auto/.claude-state`.
 
 Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). Works for any optimization target: test speed, bundle size, LLM training, build times, Lighthouse scores.
 
@@ -21,6 +21,8 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). W
 
 ## Quick start
 
+**pi**
+
 ```bash
 pi install npm:pi-autoresearch
 pi
@@ -28,7 +30,15 @@ pi
 
 Or load the package for one session only with `pi -e npm:pi-autoresearch`.
 
-Then start the loop inside pi:
+**Claude Code**
+
+```bash
+claude plugin marketplace add davebcn87/pi-autoresearch
+claude plugin install autoresearch@pi-autoresearch
+claude
+```
+
+Then start the loop inside either agent:
 
 ```text
 /autoresearch optimize unit test runtime, monitor correctness
@@ -36,20 +46,32 @@ Then start the loop inside pi:
 
 ## What's included
 
-| | |
-|---|---|
-| **Extension** | Tools + live widget + `/autoresearch` dashboard |
-| **Skill** | Gathers what to optimize, writes session files, starts the loop |
+| | pi | Claude Code |
+|---|---|---|
+| **Experiment engine** (`src/core/`) | ✓ | ✓ |
+| **Tools** `init_experiment`, `run_experiment`, `log_experiment` | pi extension tools | MCP server tools |
+| **`get_status` tool** | — (widget instead) | ✓ |
+| **Skills** `autoresearch-create`, `autoresearch-finalize`, `autoresearch-hooks` | ✓ | ✓ (same files) |
+| **`/autoresearch` command** | extension command | plugin slash command |
+| **Auto-resume** after each turn | extension timer | Stop hook |
+| **Context restore** after restart / compaction | `before_agent_start` | SessionStart hook |
+| **Live widget, terminal dashboard, keyboard shortcuts** | ✓ | — |
+| **Browser dashboard** (`/autoresearch export`) | ✓ | — |
 
-### Extension tools
+### Tools
 
 | Tool | Description |
 |------|-------------|
 | `init_experiment` | One-time session config — name, metric, unit, direction |
 | `run_experiment` | Runs any command, times wall-clock duration, captures output |
 | `log_experiment` | Records result, auto-commits, updates widget and dashboard |
+| `get_status` | *(Claude Code only)* Compact JSON: name, metric, baseline, best, run counts, confidence, last runs |
 
-### `/autoresearch` command
+Tool names and parameters are identical in both hosts, so the skills and `.auto/prompt.md` work unchanged.
+
+### `/autoresearch` command (pi)
+
+The Claude Code variant is described under [Use with Claude Code](#use-with-claude-code).
 
 | Subcommand | Description |
 |------------|-------------|
@@ -125,13 +147,13 @@ verified-free chord into `<agent-dir>/extensions/pi-autoresearch.json`, then
 pi 0.84.x. Always re-verify — pi's keymap grows over time, which is why this
 extension binds nothing by default.
 
-### UI
+### UI (pi)
 
 - **Dashboard widget** — always visible above the editor: a full results table with columns for commit, metric, status, and description.
 - **Confidence score** — after 3+ runs, shows how the best improvement compares to the session noise floor. ≥2.0× (green) = likely real, 1.0–2.0× (yellow) = above noise but marginal, <1.0× (red) = within noise.
 - **Fullscreen overlay** — `/autoresearch dashboard` opens a scrollable full-terminal dashboard. Shows a live spinner with elapsed time for running experiments.
 
-### Skills
+### Skills (both hosts)
 
 **`autoresearch-create`** asks a few questions (or infers from context) about your goal, command, metric, and files in scope — then writes two files and starts the loop immediately:
 
@@ -147,11 +169,14 @@ All session files live in a single `.auto/` subfolder at the working-directory r
 | `.auto/measure.sh` | Benchmark script — pre-checks, runs the workload, outputs `METRIC name=number` lines. |
 | `.auto/log.jsonl` | Append-only log of every run (written by the tools). |
 | `.auto/checks.sh` | *(optional)* Backpressure checks — tests, types, lint. Runs after each passing benchmark. Failures block `keep`. |
-| `.auto/hooks/` | *(optional)* Executable scripts (`before.sh`, `after.sh`) that fire around iterations. Stdout is delivered to the agent as a steer message. |
+| `.auto/hooks/` | *(optional)* Executable scripts (`before.sh`, `after.sh`) that fire around iterations. Stdout is delivered to the agent as a steer message (Claude Code: appended to the tool result). |
+| `.auto/.claude-state` | *(Claude Code only)* Loop state read by the plugin's hooks. |
 
 ---
 
 ## Install
+
+For pi (for Claude Code, see [Use with Claude Code](#use-with-claude-code)):
 
 ```bash
 pi install npm:pi-autoresearch
@@ -173,36 +198,95 @@ Then `/reload` in pi.
 
 ## Use with Claude Code
 
-pi-autoresearch also works as a Claude Code plugin. The same experiment logic runs behind a local MCP server, so `init_experiment`, `run_experiment`, `log_experiment` and `get_status` are available in Claude Code, and the `/autoresearch` command starts the loop.
+pi-autoresearch is also a Claude Code plugin. The same experiment engine runs behind a local [MCP](https://modelcontextprotocol.io) server over stdio, so `init_experiment`, `run_experiment`, `log_experiment` and `get_status` are available as tools, the three skills load as-is, and `/autoresearch` starts the loop.
 
-Requirements: Node 22.6 or newer and `npm` on the PATH. The plugin runs the TypeScript sources directly (no build step); on first launch the MCP server launcher installs its runtime dependencies into the plugin directory with `npm install --omit=dev`. The npm package ships a compiled `dist/`. The plugin needs `git` on the PATH, as the Pi extension does.
+### Requirements
 
-Install from this repository's marketplace:
+- **Node 22.6 or newer** and `npm` on the PATH. The plugin runs its TypeScript sources directly through Node's built-in type stripping, so there is no build step.
+- **`git`** on the PATH, as with the pi extension.
+- On the **first launch** from a git-marketplace install, the server launcher runs `npm install --omit=dev` once inside the plugin directory to fetch the MCP SDK. You will see one `installing MCP server dependencies` line on stderr; later launches skip it.
+
+### Install
+
+As a plugin (recommended: tools, skills, command and hooks in one step):
 
 ```bash
 claude plugin marketplace add davebcn87/pi-autoresearch
 claude plugin install autoresearch@pi-autoresearch
 ```
 
-Or add only the MCP server to one project (run from the project root):
+Only the MCP server, for one project (run from the project root; you then drive the tools yourself or through the skills):
 
 ```bash
 claude mcp add autoresearch -- node /absolute/path/to/pi-autoresearch/bin/autoresearch-mcp.mjs
 ```
 
-What you get:
+From a clone of this repository: opening the repo in Claude Code picks up its `.mcp.json` automatically, which is handy while developing the plugin.
 
-- **MCP tools**: `init_experiment`, `run_experiment`, `log_experiment` (same names and parameters as in Pi) and `get_status` (compact JSON status, Claude Code only).
-- **Resources**: `autoresearch://log`, `autoresearch://prompt`, `autoresearch://ideas` and `autoresearch://status`.
-- **`/autoresearch <goal>`**: starts or resumes the loop. Also `off`, `finalize`, `clear` and `status`.
-- **Hooks**: a SessionStart hook restores the autoresearch context in a project with an active loop, and a Stop hook resumes the loop after each turn while it is active. Both read `.auto/.claude-state`.
+### Walkthrough
 
-Differences from Pi:
+```text
+> /autoresearch optimize unit test runtime, monitor correctness
 
-- Claude Code has no live widget, fullscreen overlay or keyboard shortcuts. Use `get_status` or `/autoresearch status` instead.
-- Hook output that Pi would deliver as a steer message is appended to the tool result instead.
-- MCP cannot hide tools per turn. `run_experiment` and `log_experiment` return "Autoresearch session not initialized" until `init_experiment` has written a config header to `.auto/log.jsonl`.
-- The server reads the project from the directory Claude Code starts it in. Set `AUTORESEARCH_CWD` to override it when you register the server user-wide.
+  Claude follows the autoresearch-create skill: asks about goal, command, metric
+  and files in scope (or infers them), creates a branch, writes .auto/prompt.md
+  and .auto/measure.sh, then:
+
+  ⏺ init_experiment(name: "test-speed", metric_name: "t_s", metric_unit: "s", direction: "lower")
+  ⏺ run_experiment(command: "bash .auto/measure.sh")        → baseline 42.3 s
+  ⏺ log_experiment(commit: "a1b2c3d", metric: 42.3, status: "keep", description: "baseline")
+
+  ...edit → run_experiment → log_experiment → keep or discard...
+
+  Each time Claude would stop, the plugin's Stop hook resumes the loop:
+  "Run the next iteration now." It stops on its own after 200 resumed turns,
+  after more than 20 consecutive discards or crashes, or when maxIterations
+  is reached. When a guard trips, the hook simply lets the turn end (no message).
+
+> /autoresearch status
+  ⏺ get_status → {"name":"test-speed",
+                  "metric":{"name":"t_s","unit":"s","direction":"lower"},
+                  "baseline":42.3,"best":31.9,
+                  "runs":{"total":17,"keep":6,"discard":10,"crash":1,"checks_failed":0},
+                  "confidence":2.4,"maxExperiments":null,"lastRuns":[...]}
+
+> /autoresearch off          # stop auto-resume, keep .auto/log.jsonl
+> /autoresearch finalize     # stop, then turn kept runs into reviewable branches
+> /autoresearch clear        # delete the log and state (asks first)
+```
+
+Press `Escape` to interrupt a turn at any time. To continue, send any prompt (or `/autoresearch <goal>`); the Stop hook resumes automatically only after a turn that logged a new run. `/autoresearch off` stops it for good.
+
+### How the pieces map
+
+| Plugin file | Role |
+|---|---|
+| `.mcp.json` → `bin/autoresearch-mcp.mjs` → `src/mcp/server.ts` | Launches the stdio MCP server in the project directory |
+| `commands/autoresearch.md` | The `/autoresearch` slash command (`<goal>`, `off`, `finalize`, `clear`, `status`, `help`) |
+| `skills/` | Same `autoresearch-create`, `autoresearch-finalize` and `autoresearch-hooks` skills as pi |
+| `hooks/session-start.ts` | On startup, resume and compaction: re-injects the autoresearch guidance and `.auto/prompt.md` while a loop is active |
+| `hooks/stop.ts` | After each turn: resumes the loop while it is active and a new run was logged this turn, within the safety guards |
+| `.auto/.claude-state` | Tiny JSON file in your project: `{"active": true, "autoResumeTurns": 3, "runsAtLastStop": 17}`. Written by `/autoresearch` and by `init_experiment`; the hooks read it |
+
+**Resources** (in Claude Code, type `@autoresearch:autoresearch://log` to pull the log into the conversation; other URIs work the same way): `autoresearch://log` (raw `log.jsonl`), `autoresearch://prompt`, `autoresearch://ideas`, `autoresearch://status` (same JSON as `get_status`). Missing files return empty content, not errors.
+
+### Differences from pi
+
+- No live widget, fullscreen overlay, keyboard shortcuts or browser dashboard. Use `get_status` or `/autoresearch status`.
+- Hook output that pi delivers as a separate steer message is appended to the tool result text instead.
+- MCP cannot hide tools per turn. `run_experiment` and `log_experiment` return an `isError` result reading "Autoresearch session not initialized" until `init_experiment` has written a config header to `.auto/log.jsonl`.
+- Auto-resume is a Stop hook rather than a timer, so it only fires when the turn actually logged an experiment. That prevents chat-only loops.
+- The server reads the project from the directory Claude Code starts it in. Set `AUTORESEARCH_CWD=/path/to/project` when you register the server user-wide.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` | Node refuses to strip types inside `node_modules`. The hook scripts always run as `.ts`; the server launcher does only when no `dist/` exists. For the server, install from npm (ships `dist/`) or run `npm run build` in a checkout. The hooks still need the plugin to live outside `node_modules`. |
+| `could not install dependencies` on first launch | The plugin directory is read-only or offline. Run `npm install --omit=dev` there once by hand. |
+| Tools say "not initialized" | Call `init_experiment` first, or run `/autoresearch <goal>` which does it for you. |
+| Loop does not resume after a turn | Check `.auto/.claude-state` has `"active": true` and that the turn logged a run. `/autoresearch <goal>` re-activates it. |
+| Experiments run in the wrong directory | Set `AUTORESEARCH_CWD`, or use `workingDir` in `.auto/config.json`. |
 
 ---
 
@@ -241,10 +325,17 @@ The agent reads `.auto/log.jsonl`, groups kept experiments into logical changese
 
 ### 4. Monitor progress
 
+In pi:
+
 - **Widget** — full results table, always visible above the editor
 - **`/autoresearch dashboard`** — fullscreen scrollable dashboard overlay (optional chord: `shortcuts.fullscreenDashboard`)
 - **`/autoresearch export`** — open a live browser dashboard with chart and share card
 - **`Escape`** — interrupt anytime and ask for a summary
+
+In Claude Code:
+
+- **`/autoresearch status`** or the **`get_status`** tool — compact JSON summary of the session
+- **`Escape`** — interrupt the turn; `/autoresearch off` stops auto-resume
 
 ---
 
@@ -262,15 +353,15 @@ The agent reads `.auto/log.jsonl`, groups kept experiments into logical changese
 
 ## How it works
 
-The **extension** is domain-agnostic infrastructure. The **skill** encodes domain knowledge. This separation means one extension serves unlimited domains.
+The **host adapter** (pi extension or Claude Code plugin) is domain-agnostic infrastructure. The **skill** encodes domain knowledge. This separation means one adapter serves unlimited domains.
 
 ```
 ┌──────────────────────┐     ┌──────────────────────────┐
-│  Extension (global)  │     │  Skill (per-domain)       │
+│  Host adapter        │     │  Skill (per-domain)       │
 │                      │     │                           │
 │  run_experiment      │◄────│  command: pnpm test       │
 │  log_experiment      │     │  metric: seconds (lower)  │
-│  widget + dashboard  │     │  scope: vitest configs    │
+│  (pi ext. or plugin) │     │  scope: vitest configs    │
 │                      │     │  ideas: pool, parallel…   │
 └──────────────────────┘     └──────────────────────────┘
 ```
@@ -288,7 +379,7 @@ A fresh agent with no memory can read these two files and continue exactly where
 
 ## Configuration (optional)
 
-Create `.auto/config.json` in your pi session directory to customize behavior:
+Create `.auto/config.json` in the directory the agent was started in (the pi session directory or the Claude Code project directory) to customize behavior:
 
 ```json
 {
@@ -299,12 +390,14 @@ Create `.auto/config.json` in your pi session directory to customize behavior:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `workingDir` | string | Override the directory for all autoresearch operations — file I/O, command execution, and git. Supports absolute or relative paths (resolved against the pi session cwd). The config file itself always stays under the session cwd. Fails if the directory doesn't exist. |
+| `workingDir` | string | Override the directory for all autoresearch operations — file I/O, command execution, and git. Supports absolute or relative paths (resolved against that directory). The config file itself always stays under the session cwd. Fails if the directory doesn't exist. |
 | `maxIterations` | number | Maximum experiments before auto-stopping. The agent is told to stop and won't run more experiments until a new segment is initialized. |
 
 ### Long-running loops and context
 
 The loop is designed to run unattended across context limits. When pi's [auto-compaction](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/compaction.md) summarizes the older portion of the conversation, autoresearch detects the resulting idle and re-prompts the agent to re-read `.auto/prompt.md`, the tail of `.auto/log.jsonl`, `.auto/ideas.md`, and `git log` before continuing. All progress is persisted in those files, so the post-summary turn rehydrates from the source of truth instead of relying on whatever survived compaction. No tuning required — if pi's auto-compaction is enabled (the default), this just works.
+
+In Claude Code, the plugin's SessionStart hook fires on `compact` and re-injects the autoresearch guidance, `.auto/prompt.md` and the compaction summary while the loop is active.
 
 ---
 
@@ -408,16 +501,17 @@ Drop executable scripts in `.auto/hooks/` to run code at iteration boundaries. H
 
 ## Prerequisites
 
-1. **Install pi** — follow the instructions at [pi.dev](https://pi.dev/)
-2. **An API key** for your preferred LLM provider (configured in pi)
+1. **Install pi** ([pi.dev](https://pi.dev/)) or **Claude Code** ([claude.com/claude-code](https://claude.com/claude-code))
+2. **An API key** or subscription for your preferred LLM provider, configured in that agent
+3. **Node 22.6+**, **git**, and (for Claude Code) **npm** on the PATH
 
 ## Security and trust
 
-Pi packages run with your full user permissions. Review this repository before installing it, and run autoresearch in a dedicated branch or worktree with a clean working tree.
+Pi packages and Claude Code plugins run with your full user permissions. The Claude Code plugin additionally runs two hook scripts and may run `npm install` once inside its own directory. Review this repository before installing it, and run autoresearch in a dedicated branch or worktree with a clean working tree.
 
 Autoresearch intentionally edits files, creates and reverts commits, and executes the commands in `.auto/measure.sh`, `.auto/checks.sh`, and `.auto/hooks/`. Treat those files as executable code: review them before each session, keep credentials and sensitive files out of scope, and use a sandbox or restricted environment for untrusted projects.
 
-For reproducible installs, pin a version you have reviewed, for example `pi install npm:pi-autoresearch@1.7.0`. Published npm releases include provenance attestations.
+For reproducible installs, pin a version you have reviewed, for example `pi install npm:pi-autoresearch@2.0.0` or for the MCP server only, `npm install pi-autoresearch@2.0.0` and point `claude mcp add` at it. The Claude Code plugin install follows the marketplace's default branch, so review that checkout before installing. Published npm releases include provenance attestations.
 
 ## Controlling costs
 
@@ -430,6 +524,21 @@ Autoresearch loops run autonomously and can burn through tokens. Two ways to cap
      "maxIterations": 30
    }
    ```
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/core/` | Host-agnostic experiment engine: state, metrics, confidence, run/log/init, hooks, compaction, dashboard export. Imports only `node:*`. |
+| `extensions/pi-autoresearch/` | The pi extension: a thin adapter adding tools, widget, dashboard, shortcuts and the `/autoresearch` command on top of the core |
+| `src/mcp/` | The MCP server used by Claude Code (`server.ts`, zod `schemas.ts`, `session.ts`) |
+| `bin/autoresearch-mcp.mjs` | Server launcher: self-installs runtime deps, prefers `dist/` when present |
+| `.claude-plugin/`, `.mcp.json`, `commands/`, `hooks/` | Claude Code plugin manifest, server registration, slash command and hook scripts |
+| `skills/` | Skills shared by both hosts |
+| `tests/` | `pnpm test` runs the pi adapter tests, `tests/core/` unit tests and `tests/mcp/` stdio tests |
+| `docs/SPEC-multi-host.md` | Design spec for the multi-host architecture, including the review trail |
+
+Development: `pnpm install`, `pnpm test`, `pnpm typecheck`. `pnpm build` emits `dist/` for the npm package only.
 
 ## License
 

@@ -6,9 +6,9 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob: https://api.github.com; media-src 'self' blob:; frame-src https://platform.twitter.com; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
     <meta name="referrer" content="no-referrer">
     <meta name="theme-color" content="#070a08">
-    <meta name="description" content="pi-autoresearch gives pi an autonomous experiment loop: try an idea, measure it, keep what works, revert what doesn't, and repeat.">
+    <meta name="description" content="pi-autoresearch gives pi and Claude Code an autonomous experiment loop: try an idea, measure it, keep what works, revert what doesn't, and repeat.">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="pi-autoresearch — Autonomous experiment loop for pi">
+    <meta property="og:title" content="pi-autoresearch — Autonomous experiment loop for pi and Claude Code">
     <meta property="og:description" content="Try an idea. Measure it. Keep what works. Revert what doesn't. Repeat.">
     <meta property="og:image" content="https://davebcn87.github.io/pi-autoresearch/assets/social-preview-dark.png">
     <meta property="og:image:width" content="1200">
@@ -22,7 +22,7 @@
     <link rel="icon" href="assets/og-image.webp">
     <link rel="stylesheet" href="vendor/asciinema-player.css">
     <link rel="stylesheet" href="styles.css">
-    <title>pi-autoresearch — Autonomous experiment loop for pi</title>
+    <title>pi-autoresearch — Autonomous experiment loop for pi and Claude Code</title>
   </head>
   <body class="landing-page">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -45,15 +45,22 @@
     <main id="main">
       <section class="hero shell" id="top">
         <div class="hero-copy">
-          <p class="eyebrow">Autonomous optimization for pi</p>
+          <p class="eyebrow">Autonomous optimization for pi and Claude Code</p>
           <h1>
-            Give pi a metric.
+            Give your agent a metric.
             <span>Let it run.</span>
           </h1>
           <p class="hero-intro">It tests ideas, measures every result, keeps improvements, and reverts the rest.</p>
           <div class="install" data-copy-block>
             <code><span aria-hidden="true">$</span> pi install npm:pi-autoresearch</code>
             <button class="copy-button" type="button" data-copy="pi install npm:pi-autoresearch" aria-label="Copy install command">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+              <span>Copy</span>
+            </button>
+          </div>
+          <div class="install" data-copy-block>
+            <code><span aria-hidden="true">$</span> claude plugin marketplace add davebcn87/pi-autoresearch &amp;&amp; claude plugin install autoresearch@pi-autoresearch</code>
+            <button class="copy-button" type="button" data-copy="claude plugin marketplace add davebcn87/pi-autoresearch &amp;&amp; claude plugin install autoresearch@pi-autoresearch" aria-label="Copy Claude Code install command">
               <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
               <span>Copy</span>
             </button>
@@ -65,7 +72,7 @@
               <span>Star on GitHub</span>
               <strong data-github-stars>7,950</strong>
             </a>
-            <p class="hero-note">MIT licensed. Built for <a href="https://pi.dev/">pi</a>.</p>
+            <p class="hero-note">MIT licensed. Built for <a href="https://pi.dev/">pi</a> and Claude Code.</p>
           </div>
         </div>
 
@@ -83,7 +90,7 @@
             <div class="section-heading">
               <p class="eyebrow">How it works</p>
               <h2>One goal. <span>Many measured attempts.</span></h2>
-              <p>Give pi a metric and a boundary. It explores one hypothesis at a time, keeps evidence, and lets the benchmark decide.</p>
+              <p>Give your agent a metric and a boundary. It explores one hypothesis at a time, keeps evidence, and lets the benchmark decide.</p>
             </div>
             <div class="process-prompt">
               <p>Start with a measurable goal</p>
@@ -490,7 +497,7 @@ pnpm lint</code></pre>
               <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="m7 9 2 2-2 2M12 13h5"></path></svg>
               <div>
                 <h3>Live widget</h3>
-                <p>Every result stays visible above the pi editor while you work.</p>
+                <p>Every result stays visible above the pi editor while you work (Claude Code: <code>/autoresearch status</code>).</p>
               </div>
             </article>
             <article>
@@ -540,6 +547,13 @@ pnpm lint</code></pre>
               <span>Copy</span>
             </button>
           </div>
+          <div class="install install-light" data-copy-block>
+            <code><span aria-hidden="true">$</span> claude plugin marketplace add davebcn87/pi-autoresearch &amp;&amp; claude plugin install autoresearch@pi-autoresearch</code>
+            <button class="copy-button" type="button" data-copy="claude plugin marketplace add davebcn87/pi-autoresearch &amp;&amp; claude plugin install autoresearch@pi-autoresearch" aria-label="Copy Claude Code install command">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+              <span>Copy</span>
+            </button>
+          </div>
           <div class="closing-links">
             <a href="https://github.com/davebcn87/pi-autoresearch">View on GitHub <span aria-hidden="true">↗</span></a>
             <a href="https://www.npmjs.com/package/pi-autoresearch">View on npm <span aria-hidden="true">↗</span></a>
@@ -551,7 +565,7 @@ pnpm lint</code></pre>
     <footer class="footer">
       <div class="shell footer-inner">
         <p>pi-autoresearch</p>
-        <p>Inspired by <a href="https://github.com/karpathy/autoresearch">karpathy/autoresearch</a>. Built for <a href="https://pi.dev/">pi</a>. MIT licensed. <a href="https://github.com/davebcn87/pi-autoresearch/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</a>.</p>
+        <p>Inspired by <a href="https://github.com/karpathy/autoresearch">karpathy/autoresearch</a>. Built for <a href="https://pi.dev/">pi</a> and Claude Code. MIT licensed. <a href="https://github.com/davebcn87/pi-autoresearch/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</a>.</p>
       </div>
     </footer>
 
