@@ -17,6 +17,12 @@ export interface LogRuntimeInput {
   autoresearchMode: boolean;
   /** Called right after the jsonl line is appended (dashboard broadcast in the Pi adapter). */
   onJsonlWritten?: (workDir: string) => void;
+  /** Called right after the result is pushed onto state.results (Pi: experimentsThisSession++). */
+  onResultPushed?: () => void;
+  /** Called with the after-hook steer as soon as it returns, before the before-hook runs. */
+  onAfterSteer?: (steer: string) => void;
+  /** Called with the before-hook steer as soon as it returns. */
+  onBeforeSteer?: (steer: string) => void;
 }
 
 /** Result of logExperiment. `rejected` means the tool returns `text` as an error with no details. */
@@ -108,6 +114,7 @@ export async function logExperiment(
   };
 
   state.results.push(experiment);
+  rt.onResultPushed?.();
 
   // Register any new secondary metric names
   for (const name of Object.keys(secondaryMetrics)) {
@@ -274,6 +281,7 @@ export async function logExperiment(
     run_entry: jsonlEntry,
     session: buildSessionSnapshot(state),
   });
+  if (afterSteer) rt.onAfterSteer?.(afterSteer);
 
   const wallClockSeconds = rt.lastRunDuration;
   rt.lastRunChecks = null;
@@ -290,6 +298,7 @@ export async function logExperiment(
       last_run: jsonlEntry,
       session: buildSessionSnapshot(state),
     });
+    if (beforeSteer) rt.onBeforeSteer?.(beforeSteer);
   }
 
   return {

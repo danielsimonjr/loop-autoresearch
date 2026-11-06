@@ -1269,6 +1269,9 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         lastRunDuration: runtime.lastRunDuration,
         autoresearchMode: runtime.autoresearchMode,
         onJsonlWritten: (workDir) => dashboard.broadcast(workDir),
+        onResultPushed: () => { runtime.experimentsThisSession++; },
+        onAfterSteer: (steer) => pi.sendUserMessage(steer, { deliverAs: "steer" }),
+        onBeforeSteer: (steer) => pi.sendUserMessage(steer, { deliverAs: "steer" }),
       }, (cmd, args, opts) => pi.exec(cmd, args, opts));
       if (result.rejected) {
         return {
@@ -1276,8 +1279,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
           details: {},
         };
       }
-      runtime.experimentsThisSession++;
-      if (result.afterSteer) pi.sendUserMessage(result.afterSteer, { deliverAs: "steer" });
 
       runtime.runningExperiment = null;
       runtime.lastRunChecks = null;
@@ -1287,8 +1288,6 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         recordAutoresearchActivation(result.workDir, false);
         setAutoresearchMode(ctx, false);
         ctx.abort();
-      } else if (result.beforeSteer) {
-        pi.sendUserMessage(result.beforeSteer, { deliverAs: "steer" });
       }
 
       updateWidget(ctx);

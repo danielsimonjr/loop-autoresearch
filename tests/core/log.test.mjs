@@ -142,3 +142,28 @@ test("an after hook's stdout comes back as afterSteer and a before hook as befor
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("onAfterSteer fires before the before-hook runs; onResultPushed fires before the jsonl write", async () => {
+  const dir = await repo();
+  try {
+    const hooks = path.join(dir, ".auto", "hooks");
+    fs.mkdirSync(hooks, { recursive: true });
+    const marker = path.join(dir, ".auto", "before-ran");
+    fs.writeFileSync(path.join(hooks, "after.sh"), "echo after-steer\n");
+    fs.writeFileSync(path.join(hooks, "before.sh"), `touch '${marker}'\necho before-steer\n`);
+    fs.chmodSync(path.join(hooks, "after.sh"), 0o755);
+    fs.chmodSync(path.join(hooks, "before.sh"), 0o755);
+    const logPath = path.join(dir, ".auto", "log.jsonl");
+    fs.writeFileSync(logPath, JSON.stringify({ type: "config", name: "n", metricName: "m", metricUnit: "", bestDirection: "lower" }) + "\n");
+    const events = [];
+    const state = createExperimentState();
+    await logExperiment(entry({ status: "discard" }), dir, state, rt({
+      onResultPushed: () => events.push(["pushed", fs.readFileSync(logPath, "utf-8").split("\n").filter(Boolean).length]),
+      onAfterSteer: (s) => events.push(["after", s, fs.existsSync(marker)]),
+      onBeforeSteer: (s) => events.push(["before", s, fs.existsSync(marker)]),
+    }), spawnExec);
+    assert.deepEqual(events, [["pushed", 1], ["after", "after-steer", false], ["before", "before-steer", true]]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
