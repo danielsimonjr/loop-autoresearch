@@ -24,7 +24,7 @@
     "url": "https://github.com/davebcn87/pi-autoresearch/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.6"
   },
   "packageManager": "pnpm@10.28.2",
   "pi": {
@@ -38,6 +38,7 @@
   "files": [
     "extensions",
     "src",
+    "dist",
     "skills",
     "hooks",
     "bin",
@@ -55,7 +56,7 @@
     "test": "node --experimental-strip-types --test tests/*.test.mjs tests/core/*.test.mjs tests/mcp/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "prepublishOnly": "pnpm run typecheck && pnpm test"
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

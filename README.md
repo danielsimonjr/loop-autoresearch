@@ -175,7 +175,7 @@ Then `/reload` in pi.
 
 pi-autoresearch also works as a Claude Code plugin. The same experiment logic runs behind a local MCP server, so `init_experiment`, `run_experiment`, `log_experiment` and `get_status` are available in Claude Code, and the `/autoresearch` command starts the loop.
 
-Requirements: Node 22.6 or newer (the TypeScript sources run directly, with no build step). The plugin needs `git` on the PATH, as the Pi extension does.
+Requirements: Node 22.6 or newer and `npm` on the PATH. The plugin runs the TypeScript sources directly (no build step); on first launch the MCP server launcher installs its runtime dependencies into the plugin directory with `npm install --omit=dev`. The npm package ships a compiled `dist/`. The plugin needs `git` on the PATH, as the Pi extension does.
 
 Install from this repository's marketplace:
 
@@ -187,7 +187,7 @@ claude plugin install autoresearch@pi-autoresearch
 Or add only the MCP server to one project (run from the project root):
 
 ```bash
-claude mcp add autoresearch -- node --experimental-strip-types --no-warnings=ExperimentalWarning /absolute/path/to/pi-autoresearch/src/mcp/server.ts
+claude mcp add autoresearch -- node /absolute/path/to/pi-autoresearch/bin/autoresearch-mcp.mjs
 ```
 
 What you get:

@@ -8,15 +8,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Claude Code plugin. A local MCP server (`src/mcp/server.ts`, stdio) exposes `init_experiment`, `run_experiment`, `log_experiment` and `get_status`, plus `autoresearch://` resources for the log, prompt, ideas and status. A `/autoresearch` command, a SessionStart hook and a Stop hook (auto-resume) ship in the plugin. Requires Node 22.6 or newer; no build step.
+- Claude Code plugin. A local MCP server (`src/mcp/server.ts`, stdio) exposes `init_experiment`, `run_experiment`, `log_experiment` and `get_status`, plus `autoresearch://` resources for the log, prompt, ideas and status. A `/autoresearch` command, a SessionStart hook and a Stop hook (auto-resume) ship in the plugin. Requires Node 22.6 or newer (`engines.node` is `>=22.6`).
 - `src/core/`: the host-agnostic experiment logic. The Pi extension and the MCP server both call it. Core imports only `node:*` modules, and a test enforces that.
-- `bin/autoresearch-mcp.mjs` launcher and `AUTORESEARCH_CWD` override for the MCP server working directory.
+- `bin/autoresearch-mcp.mjs` launcher, used by the plugin's `.mcp.json` and the npm `autoresearch-mcp` bin. On first launch it installs the runtime dependencies (`npm install --omit=dev`) when `node_modules` is missing, as in a git-marketplace install. It runs `dist/mcp/server.js` when present, else `src/mcp/server.ts` with type stripping (Node refuses to strip types under `node_modules`).
+- `AUTORESEARCH_CWD` override for the MCP server working directory.
 
 ### Changed
 
 - The Pi extension is now a thin adapter over `src/core/`. Its behaviour is unchanged: the existing tests pass without edits.
-- `package.json` version 2.0.0. The `pi` manifest is unchanged. `typescript` is a dev dependency for `pnpm typecheck`; `dist/` is only produced by `pnpm build` for npm consumers.
+- `package.json` version 2.0.0. The `pi` manifest is unchanged. `typescript` is a dev dependency for `pnpm typecheck`; `dist/` is built by `prepublishOnly` and shipped in the npm package.
 - The CI tracked-files guard no longer covers `docs/`.
+
+### Known limitations
+
+- A benchmark command that ignores SIGTERM runs to its full length after a timeout or abort (unchanged from 1.x).
+- The `.auto/measure.sh` guard (`isAutoresearchShCommand`) accepts a command that chains other commands after the script, e.g. `.auto/measure.sh && other` (unchanged from 1.x).
 
 ### Fixed
 
