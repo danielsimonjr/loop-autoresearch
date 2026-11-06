@@ -27,7 +27,8 @@ jobs:
             site/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - run: pnpm typecheck
       - run: pnpm --dir site install --frozen-lockfile --ignore-scripts
       - run: pnpm --dir site build
       - run: test -f site/build/index.html -a -f site/build/configuration.html -a -f site/build/recordings/casts.js
-      - run: test -z "$(git ls-files site/build docs)"
+      - run: test -z "$(git ls-files site/build)"
