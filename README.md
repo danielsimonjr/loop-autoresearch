@@ -171,6 +171,41 @@ Then `/reload` in pi.
 
 ---
 
+## Use with Claude Code
+
+pi-autoresearch also works as a Claude Code plugin. The same experiment logic runs behind a local MCP server, so `init_experiment`, `run_experiment`, `log_experiment` and `get_status` are available in Claude Code, and the `/autoresearch` command starts the loop.
+
+Requirements: Node 22.6 or newer (the TypeScript sources run directly, with no build step). The plugin needs `git` on the PATH, as the Pi extension does.
+
+Install from this repository's marketplace:
+
+```bash
+claude plugin marketplace add davebcn87/pi-autoresearch
+claude plugin install autoresearch@pi-autoresearch
+```
+
+Or add only the MCP server to one project (run from the project root):
+
+```bash
+claude mcp add autoresearch -- node --experimental-strip-types --no-warnings=ExperimentalWarning /absolute/path/to/pi-autoresearch/src/mcp/server.ts
+```
+
+What you get:
+
+- **MCP tools**: `init_experiment`, `run_experiment`, `log_experiment` (same names and parameters as in Pi) and `get_status` (compact JSON status, Claude Code only).
+- **Resources**: `autoresearch://log`, `autoresearch://prompt`, `autoresearch://ideas` and `autoresearch://status`.
+- **`/autoresearch <goal>`**: starts or resumes the loop. Also `off`, `finalize`, `clear` and `status`.
+- **Hooks**: a SessionStart hook restores the autoresearch context in a project with an active loop, and a Stop hook resumes the loop after each turn while it is active. Both read `.auto/.claude-state`.
+
+Differences from Pi:
+
+- Claude Code has no live widget, fullscreen overlay or keyboard shortcuts. Use `get_status` or `/autoresearch status` instead.
+- Hook output that Pi would deliver as a steer message is appended to the tool result instead.
+- MCP cannot hide tools per turn. `run_experiment` and `log_experiment` return "Autoresearch session not initialized" until `init_experiment` has written a config header to `.auto/log.jsonl`.
+- The server reads the project from the directory Claude Code starts it in. Set `AUTORESEARCH_CWD` to override it when you register the server user-wide.
+
+---
+
 ## Usage
 
 ### 1. Start autoresearch

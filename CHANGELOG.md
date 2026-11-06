@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-06
+
+### Added
+
+- Claude Code plugin. A local MCP server (`src/mcp/server.ts`, stdio) exposes `init_experiment`, `run_experiment`, `log_experiment` and `get_status`, plus `autoresearch://` resources for the log, prompt, ideas and status. A `/autoresearch` command, a SessionStart hook and a Stop hook (auto-resume) ship in the plugin. Requires Node 22.6 or newer; no build step.
+- `src/core/`: the host-agnostic experiment logic. The Pi extension and the MCP server both call it. Core imports only `node:*` modules, and a test enforces that.
+- `bin/autoresearch-mcp.mjs` launcher and `AUTORESEARCH_CWD` override for the MCP server working directory.
+
+### Changed
+
+- The Pi extension is now a thin adapter over `src/core/`. Its behaviour is unchanged: the existing tests pass without edits.
+- `package.json` version 2.0.0. The `pi` manifest is unchanged. `typescript` is a dev dependency for `pnpm typecheck`; `dist/` is only produced by `pnpm build` for npm consumers.
+- The CI tracked-files guard no longer covers `docs/`.
+
+### Fixed
+
+- The Pi-only `skills/autoresearch-create` shortcut hint no longer names `ctrl+shift+t`, which has no default binding.
+
 ## [1.9.0] - 2026-10-06
 
 ### Added

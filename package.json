@@ -55,7 +55,7 @@
     "test": "node --experimental-strip-types --test tests/*.test.mjs tests/core/*.test.mjs tests/mcp/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "prepublishOnly": "pnpm run typecheck && pnpm test && pnpm run build"
+    "prepublishOnly": "pnpm run typecheck && pnpm test"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
