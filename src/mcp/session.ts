@@ -3,6 +3,7 @@
 // on-disk .auto/log.jsonl stays the source of truth, as it is for Pi.
 import * as fs from "node:fs";
 
+import { readClaudeState } from "../core/claude-hooks.ts";
 import { readMaxExperiments, resolveWorkDir } from "../core/config.ts";
 import { hasAutoresearchConfigHeader } from "../core/jsonl.ts";
 import { sessionFilePath } from "../core/paths.ts";
@@ -15,7 +16,7 @@ export interface McpSession {
   state: ExperimentState;
   lastRunChecks: { pass: boolean; output: string; duration: number } | null;
   lastRunDuration: number | null;
-  /** True once this process has run init_experiment (the Pi "mode" analogue). */
+  /** Loop mode (the Pi "mode" analogue): set by init_experiment, restored from .auto/.claude-state. */
   active: boolean;
 }
 
@@ -23,7 +24,7 @@ export function openSession(cwd: string): McpSession {
   const workDir = resolveWorkDir(cwd);
   const { state } = loadStateFromJsonl(workDir);
   state.maxExperiments = readMaxExperiments(cwd);
-  return { cwd, state, lastRunChecks: null, lastRunDuration: null, active: false };
+  return { cwd, state, lastRunChecks: null, lastRunDuration: null, active: readClaudeState(workDir).active };
 }
 
 /** Gate for run/log: an init header must exist in the log (MCP cannot hide tools). */

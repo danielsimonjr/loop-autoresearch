@@ -18,6 +18,7 @@ import { computeConfidence } from "../core/confidence.ts";
 import { fireHook, buildSessionSnapshot, type HookPayload } from "../core/hooks.ts";
 import type { InitParamsT } from "../core/types.ts";
 import { readLastRun } from "../core/jsonl.ts";
+import { readClaudeState, writeClaudeState } from "../core/claude-hooks.ts";
 import { initExperimentShape, logExperimentShape, runExperimentShape } from "./schemas.ts";
 import { NOT_INITIALIZED_TEXT, isInitialized, openSession, type McpSession } from "./session.ts";
 
@@ -27,6 +28,10 @@ const session: McpSession = openSession(cwd);
 
 function text(t: string) {
   return { content: [{ type: "text" as const, text: t }] };
+}
+
+function errorText(t: string) {
+  return { ...text(t), isError: true };
 }
 
 function readFileOrEmpty(p: string): string {
@@ -73,7 +78,14 @@ server.registerTool(
   async (args) => {
     const workDir = resolveWorkDir(session.cwd);
     const init = initExperiment(args as InitParamsT, session.cwd, session.state);
-    if (!init.ok) return text(init.text);
+    if (!init.ok) return errorText(init.text);
+    const wd = init.workDir || workDir;
+    writeClaudeState(wd, {
+      ...readClaudeState(wd),
+      active: true,
+      autoResumeTurns: 0,
+      runsAtLastStop: session.state.results.length,
+    });
     let beforeSteer: string | null = null;
     if (!session.active) {
       session.active = true;
@@ -98,7 +110,7 @@ server.registerTool(
     inputSchema: runExperimentShape,
   },
   async (args, extra) => {
-    if (!isInitialized(session)) return text(NOT_INITIALIZED_TEXT);
+    if (!isInitialized(session)) return errorText(NOT_INITIALIZED_TEXT);
     const result = await runExperiment(args, session.cwd, session.state, {
       exec: spawnExec,
       signal: extra.signal,
@@ -120,13 +132,13 @@ server.registerTool(
     inputSchema: logExperimentShape,
   },
   async (args) => {
-    if (!isInitialized(session)) return text(NOT_INITIALIZED_TEXT);
+    if (!isInitialized(session)) return errorText(NOT_INITIALIZED_TEXT);
     const result = await logExperiment(args, session.cwd, session.state, {
       lastRunChecks: session.lastRunChecks,
       lastRunDuration: session.lastRunDuration,
       autoresearchMode: session.active,
     }, spawnExec);
-    if (result.rejected) return text(result.text);
+    if (result.rejected) return errorText(result.text);
     session.lastRunChecks = null;
     session.lastRunDuration = null;
     return text(result.text + steerSuffix([result.afterSteer, result.beforeSteer]));
