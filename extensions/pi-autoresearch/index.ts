@@ -21,7 +21,7 @@ import type {
   SessionBeforeCompactEvent,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@earendil-works/pi-coding-agent";
+import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "../../src/core/truncate.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, truncateToWidth, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
