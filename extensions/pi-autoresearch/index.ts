@@ -112,7 +112,7 @@ interface AutoresearchRuntime {
 // Tool Schemas
 // ---------------------------------------------------------------------------
 
-const RunParams = Type.Object({
+export const RunParams = Type.Object({
   command: Type.String({
     description:
       "Shell command to run (e.g. 'pnpm test:vitest', 'uv run train.py')",
@@ -130,7 +130,7 @@ const RunParams = Type.Object({
   ),
 });
 
-const InitParams = Type.Object({
+export const InitParams = Type.Object({
   name: Type.String({
     description:
       'Human-readable name for this experiment session (e.g. "Optimizing liquid for fastest execution and parsing")',
