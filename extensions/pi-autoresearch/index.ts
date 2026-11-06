@@ -23,6 +23,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "../../src/core/truncate.ts";
 import { loadStateFromJsonl } from "../../src/core/state.ts";
+import { initExperiment } from "../../src/core/init.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, truncateToWidth, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -1041,62 +1042,15 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
 
-      // Validate working directory exists
-      const workDirError = validateWorkDir(ctx.cwd);
-      if (workDirError) {
+      const init = initExperiment(params, ctx.cwd, state);
+      if (!init.ok) {
         return {
-          content: [{ type: "text", text: `❌ ${workDirError}` }],
+          content: [{ type: "text", text: init.text }],
           details: {},
         };
       }
-
-      const isReinit = state.results.length > 0;
-
-      state.name = params.name;
-      state.metricName = params.metric_name;
-      state.metricUnit = params.metric_unit ?? "";
-      if (params.direction === "lower" || params.direction === "higher") {
-        state.bestDirection = params.direction;
-      }
-      // Start a new segment — keep history for dashboard, but reset baseline tracking.
-      // Old results remain accessible (filtered by segment in rendering).
-      if (isReinit) {
-        state.currentSegment++;
-      }
-      state.bestMetric = null;
-      state.secondaryMetrics = [];
-      state.confidence = null;
-
-      // Read max experiments from config file (config always in ctx.cwd)
-      state.maxExperiments = readMaxExperiments(ctx.cwd);
-
-      // Write config header to jsonl (append for re-init, create for first)
-      const workDir = resolveWorkDir(ctx.cwd);
-      try {
-        const jsonlPath = autoresearchJsonlPath(workDir);
-        ensureParentDir(jsonlPath);
-        const config = JSON.stringify({
-          type: "config",
-          name: state.name,
-          metricName: state.metricName,
-          metricUnit: state.metricUnit,
-          bestDirection: state.bestDirection,
-        });
-        if (fs.existsSync(jsonlPath)) {
-          fs.appendFileSync(jsonlPath, config + "\n");
-        } else {
-          fs.writeFileSync(jsonlPath, config + "\n");
-        }
-        broadcastDashboardUpdate(workDir);
-      } catch (e) {
-        return {
-          content: [{
-            type: "text",
-            text: `⚠️ Failed to write .auto/log.jsonl: ${e instanceof Error ? e.message : String(e)}`,
-          }],
-          details: {},
-        };
-      }
+      const workDir = init.workDir;
+      broadcastDashboardUpdate(workDir);
 
       const wasInactive = !runtime.autoresearchMode;
       recordAutoresearchActivation(workDir, true);
@@ -1114,13 +1068,10 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
         if (steer) pi.sendUserMessage(steer, { deliverAs: "steer" });
       }
 
-      const reinitNote = isReinit ? " (re-initialized — previous results archived, new baseline needed)" : "";
-      const limitNote = state.maxExperiments !== null ? `\nMax iterations: ${state.maxExperiments} (from .auto/config.json)` : "";
-      const workDirNote = workDir !== ctx.cwd ? `\nWorking directory: ${workDir}` : "";
       return {
         content: [{
           type: "text",
-          text: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${workDirNote}\nConfig written to .auto/log.jsonl. Now run the baseline with run_experiment.`,
+          text: init.text,
         }],
         details: { state: cloneExperimentState(state) },
       };

@@ -78,3 +78,11 @@ export interface LogDetails {
   state: ExperimentState;
   wallClockSeconds: number | null;
 }
+
+/** Plain shape of init_experiment params (TypeBox/zod schemas in the hosts must match). */
+export interface InitParamsT {
+  name: string;
+  metric_name: string;
+  metric_unit?: string;
+  direction?: "lower" | "higher";
+}
