@@ -2,7 +2,7 @@
 
 pi-autoresearch has deliberately few knobs. Configure where and how a session runs; keep the experiment protocol consistent.
 
-pi and the Claude Code plugin share the same `.auto/` files and the same configuration, so a session started in one host can be resumed in the other. Where a section differs by host, it says so.
+pi and the Claude Code plugin share the same `.auto/` files and the same configuration, so a session started in one host can be resumed in the other. Claude Code → pi works automatically (pi auto-activates when a log exists); pi → Claude Code needs `/autoresearch <goal>` once to write `.auto/.claude-state`. Where a section differs by host, it says so.
 
 ## Session configuration
 
@@ -57,7 +57,7 @@ run_experiment({
 
 ## Safety and trust
 
-Pi packages and Claude Code plugins run with your full user permissions. Review this repository before installing it, and run autoresearch in a dedicated branch or worktree with a clean working tree.
+Pi packages and Claude Code plugins run with your full user permissions. The Claude Code plugin install follows the marketplace's default branch, so review that checkout before installing (or install the npm package at a pinned version for the MCP server). Run autoresearch in a dedicated branch or worktree with a clean working tree.
 
 Autoresearch edits files, creates and reverts commits, and executes `.auto/measure.sh`, `.auto/checks.sh`, and scripts under `.auto/hooks/`. Review those files before each session, keep credentials and sensitive files out of scope, and use a sandbox or restricted environment for untrusted projects.
 
@@ -186,7 +186,9 @@ Resources: `autoresearch://log` (raw `log.jsonl`), `autoresearch://prompt`, `aut
   - the loop is active in `.auto/.claude-state`;
   - a new run was logged since the last stop;
   - the loop is under the 200 resumed-turn cap;
-  - there are not more than 20 consecutive discards or crashes in the current segment.
+  - there are at most 20 consecutive discards or crashes in the current segment (more than 20 stops it).
+
+  When a guard trips, the hook simply lets the turn end; no message is shown.
 
   It also stops when `maxIterations` is reached and sets the loop inactive.
 
@@ -199,7 +201,7 @@ Resources: `autoresearch://log` (raw `log.jsonl`), `autoresearch://prompt`, `aut
 
 ### Troubleshooting
 
-- **Server fails with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.** Node refuses to strip types inside `node_modules`. Install from npm, which ships `dist/`, or run `npm run build` in the checkout.
+- **Server fails with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`.** Node refuses to strip types inside `node_modules`. The hook scripts always run as `.ts`; the server launcher does only when no `dist/` exists. For the server, install from npm (ships `dist/`) or run `npm run build` in a checkout. The hooks still need the plugin to live outside `node_modules`.
 - **`could not install dependencies` on first launch.** The plugin directory is read-only or offline. Run `npm install --omit=dev` there once by hand.
 - **Tools say "not initialized".** Call `init_experiment` first, or run `/autoresearch <goal>`, which does it for you.
 - **The loop does not resume after a turn.** Check that `.auto/.claude-state` has `"active": true` and that the turn logged a run. `/autoresearch <goal>` re-activates it.
@@ -214,7 +216,7 @@ These constraints keep results comparable and sessions recoverable.
 - **State lives under `.auto/`.** The folder name and JSONL record format are part of the extension contract. Legacy files are read only for compatibility.
 - **Hooks have a fixed boundary.** Only `before.sh` and `after.sh` are recognized. They receive JSON on stdin and return steer text on stdout.
 - **Safety guards remain internal.** Auto-resume turn and consecutive-failure guards are not tuning knobs.
-- **Claude Code uses the same guards.** The Stop hook applies the same auto-resume values as pi (200 resumed turns, 20 consecutive discards or crashes). They are not configurable.
+- **Claude Code uses the same guards.** The Stop hook applies the same auto-resume values as pi (stop at 200 resumed turns, or after more than 20 consecutive discards or crashes). They are not configurable.
 - **Dashboard presentation is not themed per session.** Browser and terminal dashboards follow the extension UI rather than session-level style configuration.
 
 ## Start with the defaults
