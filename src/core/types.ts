@@ -93,3 +93,14 @@ export interface RunParamsT {
   timeout_seconds?: number;
   checks_timeout_seconds?: number;
 }
+
+/** Plain shape of log_experiment params (TypeBox/zod schemas in the hosts must match). */
+export interface LogParamsT {
+  commit: string;
+  metric: number;
+  status: "keep" | "discard" | "crash" | "checks_failed";
+  description: string;
+  metrics?: Record<string, number>;
+  force?: boolean;
+  asi?: Record<string, unknown>;
+}

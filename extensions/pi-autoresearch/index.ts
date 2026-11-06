@@ -25,6 +25,7 @@ import { truncateTail, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "
 import { loadStateFromJsonl } from "../../src/core/state.ts";
 import { initExperiment } from "../../src/core/init.ts";
 import { runExperiment } from "../../src/core/run.ts";
+import { logExperiment } from "../../src/core/log.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, truncateToWidth, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -1288,266 +1289,31 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       const runtime = getRuntime(ctx);
       const state = runtime.state;
 
-      // Validate working directory exists
-      const workDirError = validateWorkDir(ctx.cwd);
-      if (workDirError) {
+      const result = await logExperiment(params, ctx.cwd, state, {
+        lastRunChecks: runtime.lastRunChecks,
+        lastRunDuration: runtime.lastRunDuration,
+        autoresearchMode: runtime.autoresearchMode,
+        onJsonlWritten: (workDir) => broadcastDashboardUpdate(workDir),
+      }, (cmd, args, opts) => pi.exec(cmd, args, opts));
+      if (result.rejected) {
         return {
-          content: [{ type: "text", text: `❌ ${workDirError}` }],
+          content: [{ type: "text", text: result.text }],
           details: {},
         };
       }
-      const workDir = resolveWorkDir(ctx.cwd);
-      const secondaryMetrics = params.metrics ?? {};
-
-      // Gate: prevent "keep" when last run's checks failed
-      if (params.status === "keep" && runtime.lastRunChecks && !runtime.lastRunChecks.pass) {
-        return {
-          content: [{
-            type: "text",
-            text: `❌ Cannot keep — .auto/checks.sh failed.\n\n${runtime.lastRunChecks.output.slice(-500)}\n\nLog as 'checks_failed' instead. The benchmark metric is valid but correctness checks did not pass.`,
-          }],
-          details: {},
-        };
-      }
-
-      // Validate secondary metrics consistency (after first experiment establishes them)
-      if (state.secondaryMetrics.length > 0) {
-        const knownNames = new Set(state.secondaryMetrics.map((m) => m.name));
-        const providedNames = new Set(Object.keys(secondaryMetrics));
-
-        // Check for missing metrics
-        const missing = [...knownNames].filter((n) => !providedNames.has(n));
-        if (missing.length > 0) {
-          return {
-            content: [{
-              type: "text",
-              text: `❌ Missing secondary metrics: ${missing.join(", ")}\n\nYou must provide all previously tracked metrics. Expected: ${[...knownNames].join(", ")}\nGot: ${[...providedNames].join(", ") || "(none)"}\n\nFix: include ${missing.map((m) => `"${m}": <value>`).join(", ")} in the metrics parameter.`,
-            }],
-            details: {},
-          };
-        }
-
-        // Check for new metrics not yet tracked
-        const newMetrics = [...providedNames].filter((n) => !knownNames.has(n));
-        if (newMetrics.length > 0 && !params.force) {
-          return {
-            content: [{
-              type: "text",
-              text: `❌ New secondary metric${newMetrics.length > 1 ? "s" : ""} not previously tracked: ${newMetrics.join(", ")}\n\nExisting metrics: ${[...knownNames].join(", ")}\n\nIf this metric has proven very valuable to watch, call log_experiment again with force: true to add it. Otherwise, remove it from the metrics parameter.`,
-            }],
-            details: {},
-          };
-        }
-      }
-
-      // ASI: agent-supplied free-form diagnostics
-      const mergedASI = (params.asi && Object.keys(params.asi).length > 0)
-        ? params.asi as ASI
-        : undefined;
-
-      const experiment: ExperimentResult = {
-        commit: params.commit.slice(0, 7),
-        metric: params.metric,
-        metrics: secondaryMetrics,
-        status: params.status,
-        description: params.description,
-        timestamp: Date.now(),
-        segment: state.currentSegment,
-        confidence: null,
-        asi: mergedASI,
-      };
-
-      state.results.push(experiment);
       runtime.experimentsThisSession++;
+      if (result.afterSteer) pi.sendUserMessage(result.afterSteer, { deliverAs: "steer" });
 
-      // Register any new secondary metric names
-      for (const name of Object.keys(secondaryMetrics)) {
-        if (!state.secondaryMetrics.find((m) => m.name === name)) {
-          let unit = "";
-          if (name.endsWith("µs")) unit = "µs";
-          else if (name.endsWith("_ms")) unit = "ms";
-          else if (name.endsWith("_s") || name.endsWith("_sec")) unit = "s";
-          else if (name.endsWith("_kb")) unit = "kb";
-          else if (name.endsWith("_mb")) unit = "mb";
-          state.secondaryMetrics.push({ name, unit });
-        }
-      }
-
-      // Baseline = first run in current segment
-      state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
-
-      // Compute confidence score (best improvement as multiple of noise floor)
-      state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
-      experiment.confidence = state.confidence;
-
-      // Build response text
-      const segmentCount = currentResults(state.results, state.currentSegment).length;
-      let text = `Logged #${state.results.length}: ${experiment.status} — ${experiment.description}`;
-
-      if (state.bestMetric !== null) {
-        text += `\nBaseline ${state.metricName}: ${formatNum(state.bestMetric, state.metricUnit)}`;
-        if (segmentCount > 1 && params.status === "keep" && params.metric > 0) {
-          const delta = params.metric - state.bestMetric;
-          const pct = ((delta / state.bestMetric) * 100).toFixed(1);
-          const sign = delta > 0 ? "+" : "";
-          text += ` | this: ${formatNum(params.metric, state.metricUnit)} (${sign}${pct}%)`;
-        }
-      }
-
-      // Show secondary metrics
-      if (Object.keys(secondaryMetrics).length > 0) {
-        const baselines = findBaselineSecondary(state.results, state.currentSegment, state.secondaryMetrics);
-        const parts: string[] = [];
-        for (const [name, value] of Object.entries(secondaryMetrics)) {
-          const def = state.secondaryMetrics.find((m) => m.name === name);
-          const unit = def?.unit ?? "";
-          let part = `${name}: ${formatNum(value, unit)}`;
-          const bv = baselines[name];
-          if (bv !== undefined && state.results.length > 1 && bv !== 0) {
-            const d = value - bv;
-            const p = ((d / bv) * 100).toFixed(1);
-            const s = d > 0 ? "+" : "";
-            part += ` (${s}${p}%)`;
-          }
-          parts.push(part);
-        }
-        text += `\nSecondary: ${parts.join("  ")}`;
-      }
-
-      // Show ASI summary
-      if (mergedASI) {
-        const asiParts: string[] = [];
-        for (const [k, v] of Object.entries(mergedASI)) {
-          const s = typeof v === "string" ? v : JSON.stringify(v);
-          asiParts.push(`${k}: ${s.length > 80 ? s.slice(0, 77) + "…" : s}`);
-        }
-        if (asiParts.length > 0) {
-          text += `\n📋 ASI: ${asiParts.join(" | ")}`;
-        }
-      }
-
-      // Show confidence score
-      if (state.confidence !== null) {
-        const confStr = state.confidence.toFixed(1);
-        if (state.confidence >= 2.0) {
-          text += `\n📊 Confidence: ${confStr}× noise floor — improvement is likely real`;
-        } else if (state.confidence >= 1.0) {
-          text += `\n📊 Confidence: ${confStr}× noise floor — improvement is above noise but marginal`;
-        } else {
-          text += `\n⚠️ Confidence: ${confStr}× noise floor — improvement is within noise. Consider re-running to confirm before keeping.`;
-        }
-      }
-
-      text += `\n(${segmentCount} experiments`;
-      if (state.maxExperiments !== null) {
-        text += ` / ${state.maxExperiments} max`;
-      }
-      text += `)`;
-
-      // Auto-commit only on keep — discards/crashes get reverted anyway
-      if (params.status === "keep") {
-        try {
-          const resultData: Record<string, unknown> = {
-            status: params.status,
-            [state.metricName || "metric"]: params.metric,
-            ...secondaryMetrics,
-          };
-          const trailerJson = JSON.stringify(resultData);
-          const commitMsg = `${params.description}\n\nResult: ${trailerJson}`;
-
-          const execOpts = { cwd: workDir, timeout: 10000 };
-          const addResult = await pi.exec("git", ["add", "-A"], execOpts);
-          if (addResult.code !== 0) {
-            const addErr = (addResult.stdout + addResult.stderr).trim();
-            throw new Error(`git add failed (exit ${addResult.code}): ${addErr.slice(0, 200)}`);
-          }
-
-          const diffResult = await pi.exec("git", ["diff", "--cached", "--quiet"], execOpts);
-          if (diffResult.code === 0) {
-            text += `\n📝 Git: nothing to commit (working tree clean)`;
-          } else {
-            const gitResult = await pi.exec("git", ["commit", "-m", commitMsg], execOpts);
-            const gitOutput = (gitResult.stdout + gitResult.stderr).trim();
-            if (gitResult.code === 0) {
-              const firstLine = gitOutput.split("\n")[0] || "";
-              text += `\n📝 Git: committed — ${firstLine}`;
-
-              try {
-                const shaResult = await pi.exec("git", ["rev-parse", "--short=7", "HEAD"], { cwd: workDir, timeout: 5000 });
-                const newSha = (shaResult.stdout || "").trim();
-                if (newSha && newSha.length >= 7) {
-                  experiment.commit = newSha;
-                }
-              } catch {
-                // Keep the original commit hash if rev-parse fails
-              }
-            } else {
-              text += `\n⚠️ Git commit failed (exit ${gitResult.code}): ${gitOutput.slice(0, 200)}`;
-            }
-          }
-        } catch (e) {
-          text += `\n⚠️ Git commit error: ${e instanceof Error ? e.message : String(e)}`;
-        }
-      }
-
-      const jsonlEntry: Record<string, unknown> = {
-        run: state.results.length,
-        ...experiment,
-      };
-      if (!mergedASI) delete jsonlEntry.asi;
-      const jsonlLine = JSON.stringify(jsonlEntry);
-
-      try {
-        const jsonlPath = autoresearchJsonlPath(workDir);
-        ensureParentDir(jsonlPath);
-        fs.appendFileSync(jsonlPath, jsonlLine + "\n");
-        broadcastDashboardUpdate(workDir);
-      } catch (e) {
-        text += `\n⚠️ Failed to write .auto/log.jsonl: ${e instanceof Error ? e.message : String(e)}`;
-      }
-
-      if (params.status !== "keep") {
-        try {
-          const revertScript = `
-            git checkout -- . ':(exclude,glob)**/${AUTO_DIR}' ':(exclude,glob)**/${AUTO_DIR}/**' ':(exclude,glob)**/autoresearch.*' ':(exclude,glob)**/autoresearch.*/**'
-            git clean -fd -e '${AUTO_DIR}' -e '**/${AUTO_DIR}/**' -e 'autoresearch.*' -e '**/autoresearch.*/**' 2>/dev/null
-          `;
-          await pi.exec("bash", ["-c", revertScript], { cwd: workDir, timeout: 10000 });
-          text += `\n📝 Git: reverted changes (${params.status}) — autoresearch files preserved`;
-        } catch (e) {
-          text += `\n⚠️ Git revert failed: ${e instanceof Error ? e.message : String(e)}`;
-        }
-      }
-
-      const afterSteer = await fireHook({
-        event: "after",
-        cwd: workDir,
-        run_entry: jsonlEntry,
-        session: buildSessionSnapshot(state),
-      });
-      if (afterSteer) pi.sendUserMessage(afterSteer, { deliverAs: "steer" });
-
-      const wallClockSeconds = runtime.lastRunDuration;
       runtime.runningExperiment = null;
       runtime.lastRunChecks = null;
       runtime.lastRunDuration = null;
 
-      const limitReached = state.maxExperiments !== null && segmentCount >= state.maxExperiments;
-      if (limitReached) {
-        text += `\n\n🛑 Maximum experiments reached (${state.maxExperiments}). STOP the experiment loop now.`;
-        recordAutoresearchActivation(workDir, false);
+      if (result.limitReached) {
+        recordAutoresearchActivation(result.workDir, false);
         setAutoresearchMode(ctx, false);
         ctx.abort();
-      } else if (runtime.autoresearchMode) {
-        text += "\n\nBefore choosing the next experiment, consider whether this result or discovery invalidates a previous discard's rollback reason. If so, name what changed and weigh a targeted retry against other candidates. Otherwise, move on. Don't revive a discarded idea without a changed assumption. Verification reruns to resolve measurement noise are separate.";
-        const beforeSteer = await fireHook({
-          event: "before",
-          cwd: workDir,
-          next_run: state.results.length + 1,
-          last_run: jsonlEntry,
-          session: buildSessionSnapshot(state),
-        });
-        if (beforeSteer) pi.sendUserMessage(beforeSteer, { deliverAs: "steer" });
+      } else if (result.beforeSteer) {
+        pi.sendUserMessage(result.beforeSteer, { deliverAs: "steer" });
       }
 
       updateWidget(ctx);
@@ -1556,12 +1322,8 @@ export default function autoresearchExtension(pi: ExtensionAPI) {
       if (overlayTui) overlayTui.requestRender();
 
       return {
-        content: [{ type: "text", text }],
-        details: {
-          experiment: { ...experiment, metrics: { ...experiment.metrics } },
-          state: cloneExperimentState(state),
-          wallClockSeconds,
-        } as LogDetails,
+        content: [{ type: "text", text: result.text }],
+        details: result.details,
       };
     },
 
